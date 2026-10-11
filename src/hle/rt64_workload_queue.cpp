@@ -111,7 +111,11 @@ namespace RT64 {
 
         threadsRunning = true;
         renderThread = new std::thread(&WorkloadQueue::renderThreadLoop, this);
+#ifndef __EMSCRIPTEN__
+        // Not in a browser: it keeps a desktop driver from lowering the GPU's clock, which a page has no say in, and every
+        // dispatch would be a trip to the thread that owns the WebGPU device.
         idleThread = new std::thread(&WorkloadQueue::idleThreadLoop, this);
+#endif
     }
 
     void WorkloadQueue::updateMultisampling() {
