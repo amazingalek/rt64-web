@@ -29,6 +29,8 @@ SamplerState gLinearMirrorClampSampler : register(s12, space0);
 SamplerState gLinearClampWrapSampler : register(s13, space0);
 SamplerState gLinearClampMirrorSampler : register(s14, space0);
 SamplerState gLinearClampClampSampler : register(s15, space0);
+// WebGPU loads texels in their place (sampleTextureNative): it guarantees only 16 samplers in a stage.
+#ifndef WEBGPU
 SamplerState gNearestWrapWrapSampler : register(s16, space0);
 SamplerState gNearestWrapMirrorSampler : register(s17, space0);
 SamplerState gNearestWrapClampSampler : register(s18, space0);
@@ -38,6 +40,7 @@ SamplerState gNearestMirrorClampSampler : register(s21, space0);
 SamplerState gNearestClampWrapSampler : register(s22, space0);
 SamplerState gNearestClampMirrorSampler : register(s23, space0);
 SamplerState gNearestClampClampSampler : register(s24, space0);
+#endif
 
 #ifdef PER_DRAW_TEXTURES
 // Without descriptor indexing (WebGPU, or the RT64_PER_DRAW_TEXTURES build): see TextureSampler.hlsli.

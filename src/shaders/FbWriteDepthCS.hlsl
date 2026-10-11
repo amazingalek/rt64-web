@@ -4,9 +4,10 @@
 
 #include "Depth.hlsli"
 #include "FbCommon.hlsli"
+#include "WebGPU.hlsli"
 
 [[vk::push_constant]] ConstantBuffer<FbCommonCB> gConstants : register(b0, space0);
-RWBuffer<uint> gOutput : register(u1, space0);
+RW_TYPED_BUFFER(uint) gOutput : register(u1, space0);
 #ifdef MULTISAMPLING
 Texture2DMS<float> gInput : register(t0, space1);
 #else
@@ -25,6 +26,6 @@ void CSMain(uint2 coord : SV_DispatchThreadID) {
 #   endif
         float z = clamp(inputDepth, 0.0f, 1.0f);
         float dz = 0.0f; // TODO
-        gOutput[dstIndex] = EndianSwapUINT16(FloatToDepth16(z, dz));
+        storeUint16(gOutput, dstIndex, EndianSwapUINT16(FloatToDepth16(z, dz)));
     }
 }

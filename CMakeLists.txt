@@ -11,6 +11,7 @@ endif()
 option(RT64_STATIC "Build RT64 as a static library" OFF)
 
 
+option(RT64_WGSL "Compile the shaders to WGSL for WebGPU, in place of DXIL, SPIR-V and Metal (always on with Emscripten)" OFF)
 option(RT64_SDL_WINDOW_VULKAN "Build RT64 to expect an SDL Window outside of Windows" OFF)
 option(RT64_PER_DRAW_TEXTURES "Bind textures per draw on every device, as devices without descriptor indexing (WebGPU) need; to test that path" OFF)
 
@@ -66,13 +67,37 @@ else()
     endif()
 endif()
 
+# WebGPU: dxc (on the host) compiles to SPIR-V with -D WEBGPU, naga turns that into WGSL, and plume's PlumeWGSL.cmake
+# moves the push constants into the uniform buffer plume's WebGPU backend gives them. WEBGPU is what the shaders check
+# (shaders/WebGPU.hlsli).
+if (EMSCRIPTEN)
+    set (RT64_WGSL ON)
+    if (CMAKE_HOST_WIN32)
+        set (DXC "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
+    elseif (CMAKE_HOST_APPLE)
+        set (DXC "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/arm64/dxc-macos")
+    else()
+        set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc-linux")
+    endif()
+endif()
+if (RT64_WGSL)
+    find_program(RT64_NAGA_EXECUTABLE naga)
+    if (NOT RT64_NAGA_EXECUTABLE)
+        message(FATAL_ERROR "naga not found: install naga-cli (cargo install naga-cli) or set RT64_NAGA_EXECUTABLE.")
+    endif()
+    set (RT64_PLUME_WGSL "${PROJECT_SOURCE_DIR}/src/contrib/plume/examples/cmake/modules/PlumeWGSL.cmake")
+endif()
+
 set(ZSTD_LEGACY_SUPPORT OFF)
 set(ZSTD_BUILD_STATIC ON)
 set(ZSTD_BUILD_SHARED OFF)
 
 add_subdirectory(src/tools/file_to_c)
 add_subdirectory(src/contrib/re-spirv)
-add_subdirectory(src/contrib/nativefiledialog-extended)
+# A browser has no native file dialogs.
+if (NOT EMSCRIPTEN)
+    add_subdirectory(src/contrib/nativefiledialog-extended)
+endif()
 add_subdirectory(src/contrib/zstd/build/cmake)
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux" AND RT64_SDL_WINDOW_VULKAN)
@@ -106,7 +131,7 @@ set(ANDROID_ABI arm64-v8a)
 # For DXC
 set (DXC_COMMON_OPTS "-I${PROJECT_SOURCE_DIR}/src")
 # WebGPU has no descriptor indexing, so its shaders always bind textures per draw (TextureSampler.hlsli).
-if (RT64_PER_DRAW_TEXTURES OR EMSCRIPTEN)
+if (RT64_PER_DRAW_TEXTURES OR RT64_WGSL)
     list(APPEND DXC_COMMON_OPTS "-D" "PER_DRAW_TEXTURES")
 endif()
 set (DXC_DXIL_OPTS "-Wno-ignored-attributes")
@@ -127,6 +152,20 @@ function(build_shader_spirv_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
         DEPENDS ${OUTNAME}.spv file_to_c
         BYPRODUCTS ${OUTNAME}.spirv.h)
     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.spirv.c)
+endfunction()
+
+function(build_shader_wgsl_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+    # WebGPU's clip space is D3D's, so the vertex shaders keep their y.
+    set(OPTIONS ${ARGN})
+    list(REMOVE_ITEM OPTIONS "-fvk-invert-y")
+    add_custom_command(OUTPUT ${OUTNAME}.wgsl.spv
+        COMMAND ${DXC} ${DXC_SPV_OPTS} -D WEBGPU ${OPTIONS} ${FILENAME} /Fo ${OUTNAME}.wgsl.spv
+        DEPENDS ${FILENAME})
+    add_custom_command(OUTPUT ${OUTNAME}.wgsl ${OUTNAME}.wgsl.c ${OUTNAME}.wgsl.h
+        COMMAND ${CMAKE_COMMAND} -DNAGA=${RT64_NAGA_EXECUTABLE} -DINPUT=${OUTNAME}.wgsl.spv -DOUTPUT=${OUTNAME}.wgsl
+            -DVAR_NAME=${TARGET_NAME}BlobWGSL -DOUTPUT_C=${OUTNAME}.wgsl.c -DOUTPUT_H=${OUTNAME}.wgsl.h -P ${RT64_PLUME_WGSL}
+        DEPENDS ${OUTNAME}.wgsl.spv ${RT64_PLUME_WGSL})
+    target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.wgsl.c)
 endfunction()
 
 function(build_shader_dxil_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
@@ -175,6 +214,10 @@ function(build_shader TARGETOBJ SHADERNAME OPTIONS)
     cmake_path(GET OUTNAME STEM TARGET_NAME)
     cmake_path(GET OUTNAME PARENT_PATH OUTPUT_DIR)
     file(MAKE_DIRECTORY ${OUTPUT_DIR})
+    if (RT64_WGSL)
+        build_shader_wgsl_impl(${TARGETOBJ} ${FILENAME} ${TARGET_NAME} ${OUTNAME} ${OPTIONS} ${EXTRA_ARGS})
+        return()
+    endif()
     # Compile DXIL shader binaries if building on Windows
     if (WIN32)
         build_shader_dxil_impl(${TARGETOBJ} ${FILENAME} ${TARGET_NAME} ${OUTNAME} ${OPTIONS} ${EXTRA_ARGS})
@@ -220,6 +263,10 @@ function(build_shader_spirv TARGETOBJ SHADERNAME OPTIONS)
     cmake_path(GET OUTNAME STEM TARGET_NAME)
     cmake_path(GET OUTNAME PARENT_PATH OUTPUT_DIR)
     file(MAKE_DIRECTORY ${OUTPUT_DIR})
+    if (RT64_WGSL)
+        build_shader_wgsl_impl(${TARGETOBJ} ${FILENAME} ${TARGET_NAME} ${OUTNAME} ${OPTIONS} ${EXTRA_ARGS})
+        return()
+    endif()
     build_shader_spirv_impl(${TARGETOBJ} ${FILENAME} ${TARGET_NAME} ${OUTNAME} ${OPTIONS} ${EXTRA_ARGS})
 endfunction()
 
@@ -294,6 +341,11 @@ if (WIN32)
     set(SDL2_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/include")
     set(SDL2_LIBRARIES "SDL2" "SDL2main")
     link_directories("${PROJECT_SOURCE_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64")
+elseif (EMSCRIPTEN)
+    # Emscripten's own port of SDL2.
+    add_compile_options("-sUSE_SDL=2")
+    set(SDL2_LIBRARIES "-sUSE_SDL=2")
+    set(SDL2_INCLUDE_DIRS "${EMSCRIPTEN_SYSROOT}/include/SDL2")
 else()
     find_package(SDL2 REQUIRED)
 endif()
@@ -450,7 +502,9 @@ endif()
 
 # Add common libraries.
 target_link_libraries(rt64 re-spirv)
-target_link_libraries(rt64 nfd)
+if (NOT EMSCRIPTEN)
+    target_link_libraries(rt64 nfd)
+endif()
 target_link_libraries(rt64 libzstd_static)
 target_link_libraries(rt64 plume)
 
@@ -513,6 +567,16 @@ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/
 build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantMS.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING")
 build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")
 build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatMS.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING")
+if (RT64_WGSL)
+    # Dual-source blending is optional in WebGPU, so RasterPS also comes with it, for the devices that have it; the
+    # variants above write one output (RasterPS.hlsl).
+    build_pixel_shader(  rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSDynamicDualSource.hlsl" "-D DYNAMIC_RENDER_PARAMS" "-D DUAL_SOURCE_BLENDING")
+    build_pixel_shader(  rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSDynamicMSDualSource.hlsl" "-D DYNAMIC_RENDER_PARAMS" "-D MULTISAMPLING" "-D DUAL_SOURCE_BLENDING")
+    build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D DUAL_SOURCE_BLENDING")
+    build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantMSDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING" "-D DUAL_SOURCE_BLENDING")
+    build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D DUAL_SOURCE_BLENDING")
+    build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatMSDualSource.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING" "-D DUAL_SOURCE_BLENDING")
+endif()
 build_vertex_shader( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSDynamic.hlsl" "-D DYNAMIC_RENDER_PARAMS")
 build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstant.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS")
 build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")

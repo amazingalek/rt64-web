@@ -48,6 +48,13 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
 LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float2 vertexUV, float4 vertexSmoothColor, float4 vertexFlatColor,
     bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
 {
+    // Derivatives first, while every pixel of the quad is still running: they are undefined after a pixel returns, and
+    // WGSL refuses them in control flow that can differ between pixels.
+    const float ddxDepth = ddx(vertexPosition.z);
+    const float ddyDepth = ddy(vertexPosition.z);
+    float2 ddxVertexUV = ddx(vertexUV);
+    float2 ddyVertexUV = ddy(vertexUV);
+
     const OtherMode otherMode = { rp.omL, rp.omH };
 #if defined(DYNAMIC_RENDER_PARAMS)
     if ((otherMode.cycleType() != G_CYC_COPY) && renderFlagCulling(rp.flags) && isFrontFace) {
@@ -100,7 +107,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
             dz = instanceRDPParams[instanceIndex].primDepth.y;
         }
         else {
-            dz = (abs(ddx(vertexPosition.z)) + abs(ddy(vertexPosition.z))) * FbParams.resolutionScale.y;
+            dz = (abs(ddxDepth) + abs(ddyDepth)) * FbParams.resolutionScale.y;
         }
 
         // Perform the decal depth tolerance check.
@@ -111,8 +118,6 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         }
     }
     
-    float2 ddxVertexUV = ddx(vertexUV);
-    float2 ddyVertexUV = ddy(vertexUV);
     float2 lowResUV = vertexUV;
     if (!renderFlagUpscale2D(rp.flags)) {
         float2 screenPos = floor(vertexPosition.xy);
@@ -255,6 +260,14 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         resultColor.a = resultCvg;
     }
     
+#if defined(WEBGPU) && !defined(DUAL_SOURCE_BLENDING)
+    // Without dual-source blending, which WebGPU leaves optional, an alpha-blended draw blends by the alpha of its one
+    // output, so the blend factor takes the coverage's place there.
+    if (alphaBlend) {
+        resultColor.a = resultAlpha.a;
+    }
+#endif
+
     // Add highlight color to the last step.
     uint highlightColorUint = instanceRenderIndices[gConstants.renderIndex].highlightColor;
     if (highlightColorUint > 0) {
@@ -291,8 +304,12 @@ void PSMain(
 #if defined(DYNAMIC_RENDER_PARAMS)
     , bool isFrontFace : SV_IsFrontFace
 #endif
+#if defined(WEBGPU) && !defined(DUAL_SOURCE_BLENDING)
+    , [[vk::location(0)]] out float4 pixelColor : SV_TARGET0
+#else
     , [[vk::location(0)]] [[vk::index(0)]] out float4 pixelColor : SV_TARGET0
     , [[vk::location(0)]] [[vk::index(1)]] out float4 pixelAlpha : SV_TARGET1
+#endif
 )
 {
 #if !defined(DYNAMIC_RENDER_PARAMS)
@@ -309,6 +326,8 @@ void PSMain(
     }
 
     pixelColor = resultColor;
+#if !defined(WEBGPU) || defined(DUAL_SOURCE_BLENDING)
     pixelAlpha = resultAlpha;
+#endif
 }
 #endif

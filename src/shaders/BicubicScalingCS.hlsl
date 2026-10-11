@@ -5,6 +5,7 @@
 //
 
 #include "Color.hlsli"
+#include "WebGPU.hlsli"
 
 #define BLOCK_SIZE 8
 
@@ -15,7 +16,7 @@ struct BicubicCB {
 
 [[vk::push_constant]] ConstantBuffer<BicubicCB> gConstants : register(b0);
 Texture2D<float4> gInput : register(t1);
-RWTexture2D<float4> gOutput : register(u2);
+IMAGE_FORMAT("rgba8") RWTexture2D<float4> gOutput : register(u2);
 SamplerState gSampler : register(s3);
 
 float4 cubic(float x) {

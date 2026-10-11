@@ -7,6 +7,7 @@
 
 #include "Constants.hlsli"
 #include "Math.hlsli"
+#include "WebGPU.hlsli"
 
 #define NUM_HISTOGRAM_BINS 64
 #define HISTOGRAM_AVERAGE_THREADS_PER_DIMENSION 8
@@ -21,7 +22,7 @@ struct HistogramAverageCB {
 
 [[vk::push_constant]] ConstantBuffer<HistogramAverageCB> gConstants : register(b0);
 ByteAddressBuffer LuminanceHistogram : register(t1);
-RWTexture2D<float> LuminanceOutput : register(u2);
+IMAGE_FORMAT("r32f") RWTexture2D<float> LuminanceOutput : register(u2);
 
 groupshared float HistogramShared[NUM_HISTOGRAM_BINS];
 
@@ -43,7 +44,8 @@ void CSMain(uint groupIndex : SV_GroupIndex) {
         float weightedAverage = (HistogramShared[0].x / max(float(gConstants.pixelCount) - countForThisBin, 1.0)) - 1.0;
         float weightedAverageLuminance = ((weightedAverage / 62.0) * gConstants.luminanceRange) + gConstants.minLuminance;
         float luminanceLastFrame = LuminanceOutput[uint2(0, 0)];
-        if (isinf(luminanceLastFrame) || isnan(luminanceLastFrame)) {
+        // Infinite or NaN: an exponent of all ones. (naga can't translate isinf and isnan to WGSL.)
+        if ((asuint(luminanceLastFrame) & 0x7F800000U) == 0x7F800000U) {
             luminanceLastFrame = 1.0;
         }
 

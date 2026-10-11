@@ -3,6 +3,7 @@
 //
 
 #include "TextureDecoder.hlsli"
+#include "WebGPU.hlsli"
 
 #define GROUP_SIZE 8
 
@@ -18,7 +19,7 @@ struct TextureDecodeCB {
 
 [[vk::push_constant]] ConstantBuffer<TextureDecodeCB> gConstants : register(b0);
 Texture1D<uint> TMEM : register(t1);
-RWTexture2D<float4> RGBA32 : register(u2);
+IMAGE_FORMAT("rgba8") RWTexture2D<float4> RGBA32 : register(u2);
 
 [numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
 void CSMain(uint2 coord : SV_DispatchThreadID) {

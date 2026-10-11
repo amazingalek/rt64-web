@@ -4,9 +4,10 @@
 
 #include "FbCommon.hlsli"
 #include "Random.hlsli"
+#include "WebGPU.hlsli"
 
 [[vk::push_constant]] ConstantBuffer<FbCommonCB> gConstants : register(b0, space0);
-RWBuffer<uint> gOutput : register(u1, space0);
+RW_TYPED_BUFFER(uint) gOutput : register(u1, space0);
 Texture2D<float4> gInput : register(t0, space1);
 
 [numthreads(FB_COMMON_WORKGROUP_SIZE, FB_COMMON_WORKGROUP_SIZE, 1)]
@@ -19,6 +20,6 @@ void CSMain(uint2 coord : SV_DispatchThreadID) {
         uint randomSeed = initRand(gConstants.ditherRandomSeed, dstIndex, 16);
         uint ditherValue = DitherPatternValue(gConstants.ditherPattern, offsetCoord, randomSeed);
         uint nativeUint = Float4ToUINT(color, gConstants.siz, gConstants.fmt, oddColumn, ditherValue, gConstants.usesHDR);
-        gOutput[dstIndex] = EndianSwapUINT(nativeUint, gConstants.siz);
+        storeUintSiz(gOutput, dstIndex, EndianSwapUINT(nativeUint, gConstants.siz), gConstants.siz);
     }
 }

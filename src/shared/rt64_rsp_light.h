@@ -10,13 +10,18 @@
 namespace interop {
 #endif
     struct RSPLight {
+        // Each float3 starts on 16 bytes, so the D3D packing dxc gives a StructuredBuffer (-fvk-use-dx-layout) is also
+        // the layout WGSL gives a storage buffer (vec3 aligns to 16).
         float3 posDir;
-        float3 col;
-        float3 colc;
         uint kc;
+        float3 col;
         uint kl;
+        float3 colc;
         uint kq;
     };
+#ifdef HLSL_CPU
+    static_assert(sizeof(RSPLight) == 48, "RSPLight must keep the layout WGSL gives it.");
+#endif
 
 #ifndef HLSL_CPU
     float computeAttenuation(float distance, const RSPLight light) {

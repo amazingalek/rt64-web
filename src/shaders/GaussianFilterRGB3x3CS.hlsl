@@ -4,6 +4,8 @@
 
 // Based on the shader from the D3D12 Raytracing Real Time Denoised Ambient Occlusion sample by Microsoft.
 // https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Samples/Desktop/D3D12Raytracing/src/D3D12RaytracingRealTimeDenoisedAmbientOcclusion/RTAO/Shaders/Denoising/GaussianFilterRG3x3CS.hlsl
+
+#include "WebGPU.hlsli"
 // Copyright (c) Microsoft. All rights reserved.
 
 #define BLOCK_SIZE 8
@@ -15,7 +17,7 @@ struct TextureCB {
 
 [[vk::push_constant]] ConstantBuffer<TextureCB> gConstants : register(b0);
 Texture2D<float4> gInput : register(t1);
-RWTexture2D<float4> gOutput : register(u2);
+IMAGE_FORMAT("rgba8") RWTexture2D<float4> gOutput : register(u2);
 SamplerState gSampler : register(s3);
 
 [numthreads(BLOCK_SIZE, BLOCK_SIZE, 1)]

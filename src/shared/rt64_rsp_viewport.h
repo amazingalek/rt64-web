@@ -12,8 +12,12 @@
 namespace interop {
 #endif
     struct RSPViewport {
+        // Each float3 starts on 16 bytes and the struct is 32 long, so the D3D packing dxc gives a StructuredBuffer
+        // (-fvk-use-dx-layout) is also the layout WGSL gives a storage buffer (vec3 aligns to 16).
         float3 scale;
+        float scalePad;
         float3 translate;
+        float translatePad;
 
         static RSPViewport identity() {
             RSPViewport viewport;
@@ -40,6 +44,9 @@ namespace interop {
         }
 #endif
     };
+#ifdef HLSL_CPU
+    static_assert(sizeof(RSPViewport) == 32, "RSPViewport must keep the layout WGSL gives it.");
+#endif
 #ifdef HLSL_CPU
 };
 #endif

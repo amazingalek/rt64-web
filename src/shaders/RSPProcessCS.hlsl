@@ -8,6 +8,7 @@
 #include "shared/rt64_rsp_viewport.h"
 
 #include "TextureGen.hlsli"
+#include "WebGPU.hlsli"
 
 #define GROUP_SIZE 64
 
@@ -19,18 +20,18 @@ struct RSPProcessCB {
 };
 
 [[vk::push_constant]] ConstantBuffer<RSPProcessCB> gConstants : register(b0);
-Buffer<float> srcPos : register(t1);
-Buffer<float> srcVel : register(t2);
-Buffer<float> srcTc : register(t3);
-Buffer<float> srcTcVel : register(t4);
-Buffer<uint> srcCol : register(t5);
-Buffer<int> srcNorm : register(t6);
-Buffer<uint> srcViewProjIndices : register(t7);
-Buffer<uint> srcWorldIndices : register(t8);
-Buffer<uint> srcFogIndices : register(t9);
-Buffer<uint> srcLightIndices : register(t10);
-Buffer<uint> srcLightCounts : register(t11);
-Buffer<uint> srcLookAtIndices : register(t12);
+TYPED_BUFFER(float) srcPos : register(t1);
+TYPED_BUFFER(float) srcVel : register(t2);
+TYPED_BUFFER(float) srcTc : register(t3);
+TYPED_BUFFER(float) srcTcVel : register(t4);
+TYPED_BUFFER(uint) srcCol : register(t5);
+TYPED_BUFFER(int) srcNorm : register(t6);
+TYPED_BUFFER(uint) srcViewProjIndices : register(t7);
+TYPED_BUFFER(uint) srcWorldIndices : register(t8);
+TYPED_BUFFER(uint) srcFogIndices : register(t9);
+TYPED_BUFFER(uint) srcLightIndices : register(t10);
+TYPED_BUFFER(uint) srcLightCounts : register(t11);
+TYPED_BUFFER(uint) srcLookAtIndices : register(t12);
 StructuredBuffer<RSPViewport> rspViewportVector : register(t13);
 StructuredBuffer<RSPFog> rspFogVector : register(t14);
 StructuredBuffer<RSPLight> rspLightVector : register(t15);
@@ -48,25 +49,25 @@ void CSMain(uint vertexIndex : SV_DispatchThreadID) {
     }
 
     const uint vertexOffsetIndex = gConstants.vertexStart + vertexIndex;
-    const uint viewProjIndex = srcViewProjIndices[vertexOffsetIndex];
-    const uint transformIndex = srcWorldIndices[vertexOffsetIndex];
+    const uint viewProjIndex = loadUint16(srcViewProjIndices, vertexOffsetIndex);
+    const uint transformIndex = loadUint16(srcWorldIndices, vertexOffsetIndex);
     const float4x4 viewProjMat = viewProjTransforms[viewProjIndex];
     const float4x4 worldMat = worldTransforms[transformIndex];
     const uint posIndex = vertexOffsetIndex * 3;
     const uint normColIndex = vertexOffsetIndex * 4;
     const float3 norm = float3(
-        srcNorm[normColIndex + 0] / 127.0f,
-        srcNorm[normColIndex + 1] / 127.0f,
-        srcNorm[normColIndex + 2] / 127.0f
+        loadInt8(srcNorm, normColIndex + 0) / 127.0f,
+        loadInt8(srcNorm, normColIndex + 1) / 127.0f,
+        loadInt8(srcNorm, normColIndex + 2) / 127.0f
     );
 
     // NDC Position.
-    const float3 pos = float3(srcPos[posIndex + 0], srcPos[posIndex + 1], srcPos[posIndex + 2]);
-    const float3 vel = float3(srcVel[posIndex + 0], srcVel[posIndex + 1], srcVel[posIndex + 2]);
+    const float3 pos = float3(loadFloat(srcPos, posIndex + 0), loadFloat(srcPos, posIndex + 1), loadFloat(srcPos, posIndex + 2));
+    const float3 vel = float3(loadFloat(srcVel, posIndex + 0), loadFloat(srcVel, posIndex + 1), loadFloat(srcVel, posIndex + 2));
     float4 tfPos = mul(mul(viewProjMat, worldMat), float4(pos - vel * (1.0f - gConstants.curFrameWeight), 1.0f));
 
     // Fog.
-    const uint fogIndex = srcFogIndices[vertexOffsetIndex];
+    const uint fogIndex = loadUint16(srcFogIndices, vertexOffsetIndex);
     float4 vertexColor;
     if (fogIndex > 0) {
         const RSPFog rspFog = rspFogVector[fogIndex - 1];
@@ -74,13 +75,13 @@ void CSMain(uint vertexIndex : SV_DispatchThreadID) {
         vertexColor.a = clamp(fogAlpha / 255.0f, 0.0f, 1.0f);
     }
     else {
-        vertexColor.a = srcCol[normColIndex + 3] / 255.0f;
+        vertexColor.a = loadUint8(srcCol, normColIndex + 3) / 255.0f;
     }
 
     // Texgen.
     const uint tcIndex = vertexOffsetIndex * 2;
-    const uint lookAtIndex = srcLookAtIndices[vertexOffsetIndex];
-    float2 tc = float2(srcTc[tcIndex + 0], srcTc[tcIndex + 1]);
+    const uint lookAtIndex = loadUint16(srcLookAtIndices, vertexOffsetIndex);
+    float2 tc = float2(loadFloat(srcTc, tcIndex + 0), loadFloat(srcTc, tcIndex + 1));
     if (lookAtIndex & RSP_LOOKAT_INDEX_ENABLED) {
         const bool textureGenLinear = lookAtIndex & RSP_LOOKAT_INDEX_LINEAR;
         const uint extractedIndex = (lookAtIndex >> RSP_LOOKAT_INDEX_SHIFT);
@@ -88,13 +89,13 @@ void CSMain(uint vertexIndex : SV_DispatchThreadID) {
         tc = computeTextureGen(tc, norm, lookAt, textureGenLinear, worldMat);
     }
     else {
-        float2 tcVel = float2(srcTcVel[tcIndex + 0], srcTcVel[tcIndex + 1]);
+        float2 tcVel = float2(loadFloat(srcTcVel, tcIndex + 0), loadFloat(srcTcVel, tcIndex + 1));
         tc -= tcVel * (1.0f - gConstants.curFrameWeight);
     }
 
     // Lighting.
-    const uint lightIndex = srcLightIndices[vertexOffsetIndex];
-    const uint lightCount = srcLightCounts[vertexOffsetIndex];
+    const uint lightIndex = loadUint16(srcLightIndices, vertexOffsetIndex);
+    const uint lightCount = loadUint8(srcLightCounts, vertexOffsetIndex);
     if (lightCount > 0) {
         const uint ambientIndex = lightIndex + lightCount - 1;
         float3 resultColor = rspLightVector[ambientIndex].col;
@@ -112,9 +113,9 @@ void CSMain(uint vertexIndex : SV_DispatchThreadID) {
     }
     else {
         vertexColor.rgb = float3(
-            srcCol[normColIndex + 0] / 255.0f, 
-            srcCol[normColIndex + 1] / 255.0f, 
-            srcCol[normColIndex + 2] / 255.0f
+            loadUint8(srcCol, normColIndex + 0) / 255.0f, 
+            loadUint8(srcCol, normColIndex + 1) / 255.0f, 
+            loadUint8(srcCol, normColIndex + 2) / 255.0f
         );
     }
     

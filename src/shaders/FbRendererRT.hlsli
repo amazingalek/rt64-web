@@ -31,28 +31,35 @@ RWBuffer<float4> gHitVelocityDistance : register(u41, space0);
 RWBuffer<float4> gHitColor : register(u42, space0);
 RWBuffer<float4> gHitNormalFog : register(u43, space0);
 RWBuffer<uint> gHitInstanceId : register(u44, space0);
-RWTexture2D<float4> gViewDirection : register(u45, space0);
-RWTexture2D<float4> gShadingPosition : register(u46, space0);
-RWTexture2D<float4> gShadingNormal : register(u47, space0);
-RWTexture2D<float4> gShadingSpecular : register(u48, space0);
-RWTexture2D<float4> gDiffuse : register(u49, space0);
-RWTexture2D<int> gInstanceId : register(u50, space0);
-RWTexture2D<float4> gDirectLightAccum : register(u51, space0);
-RWTexture2D<float4> gIndirectLightAccum : register(u52, space0);
-RWTexture2D<float4> gReflection : register(u53, space0);
-RWTexture2D<float4> gRefraction : register(u54, space0);
-RWTexture2D<float4> gTransparent : register(u55, space0);
-RWTexture2D<float2> gFlow : register(u56, space0);
-RWTexture2D<float> gReactiveMask : register(u57, space0);
-RWTexture2D<float> gLockMask : register(u58, space0);
-RWTexture2D<float4> gNormalRoughness : register(u59, space0);
-RWTexture2D<float> gDepth : register(u60, space0);
-RWTexture2D<float4> gPrevNormalRoughness : register(u61, space0);
-RWTexture2D<float> gPrevDepth : register(u62, space0);
-RWTexture2D<float4> gPrevDirectLightAccum : register(u63, space0);
-RWTexture2D<float4> gPrevIndirectLightAccum : register(u64, space0);
-RWTexture2D<float4> gFilteredDirectLight : register(u65, space0);
-RWTexture2D<float4> gFilteredIndirectLight : register(u66, space0);
+// WebGPU builds no ray tracing shader, so nothing writes these there, and the debugger's views (DebugPS) only read
+// them: as sampled textures they need no storage format.
+#ifdef WEBGPU
+#   define RT_TEXTURE2D(T, NAME, REG) Texture2D<T> NAME : register(t##REG, space0)
+#else
+#   define RT_TEXTURE2D(T, NAME, REG) RWTexture2D<T> NAME : register(u##REG, space0)
+#endif
+RT_TEXTURE2D(float4, gViewDirection, 45);
+RT_TEXTURE2D(float4, gShadingPosition, 46);
+RT_TEXTURE2D(float4, gShadingNormal, 47);
+RT_TEXTURE2D(float4, gShadingSpecular, 48);
+RT_TEXTURE2D(float4, gDiffuse, 49);
+RT_TEXTURE2D(int, gInstanceId, 50);
+RT_TEXTURE2D(float4, gDirectLightAccum, 51);
+RT_TEXTURE2D(float4, gIndirectLightAccum, 52);
+RT_TEXTURE2D(float4, gReflection, 53);
+RT_TEXTURE2D(float4, gRefraction, 54);
+RT_TEXTURE2D(float4, gTransparent, 55);
+RT_TEXTURE2D(float2, gFlow, 56);
+RT_TEXTURE2D(float, gReactiveMask, 57);
+RT_TEXTURE2D(float, gLockMask, 58);
+RT_TEXTURE2D(float4, gNormalRoughness, 59);
+RT_TEXTURE2D(float, gDepth, 60);
+RT_TEXTURE2D(float4, gPrevNormalRoughness, 61);
+RT_TEXTURE2D(float, gPrevDepth, 62);
+RT_TEXTURE2D(float4, gPrevDirectLightAccum, 63);
+RT_TEXTURE2D(float4, gPrevIndirectLightAccum, 64);
+RT_TEXTURE2D(float4, gFilteredDirectLight, 65);
+RT_TEXTURE2D(float4, gFilteredIndirectLight, 66);
 Texture2D<float4> gBlueNoise : register(t67, space0);
 
 // Set 3 - Framebuffer.

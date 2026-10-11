@@ -154,7 +154,21 @@ static const float LowPrecision = 128.0f;
 float4 sampleTextureNative(Texture2D texture, uint nativeSampler, int2 texelBaseInt, float2 textureSize) {
     // Transform to native coordinate. Half pixel offset is required to reach the desired texel.
     float2 nativeUVCoord = (float2(texelBaseInt) + 0.5f) / textureSize;
-            
+
+#ifdef WEBGPU
+    // WebGPU guarantees only 16 samplers in a stage, and SampleGrad needs the 9 linear ones. A nearest sample at a
+    // texel's centre is that texel, so load it, with the sampler's address mode applied to the texel coordinate.
+    const int2 size = int2(textureSize);
+    const uint addressModeU = (nativeSampler - 1) / 3;
+    const uint addressModeV = (nativeSampler - 1) % 3;
+    int2 texel = texelBaseInt;
+    int2 period = int2(addressModeU == 1 ? 2 : 1, addressModeV == 1 ? 2 : 1) * size;
+    int2 wrapped = ((texel % period) + period) % period;
+    int2 mirrored = select(wrapped < size, wrapped, period - 1 - wrapped);
+    texel.x = (addressModeU == 2) ? clamp(texel.x, 0, size.x - 1) : mirrored.x;
+    texel.y = (addressModeV == 2) ? clamp(texel.y, 0, size.y - 1) : mirrored.y;
+    return texture.Load(int3(texel, 0));
+#else
     // Choose the native sampler that was determined to be compatible.
     switch (nativeSampler) {
         case NATIVE_SAMPLER_WRAP_WRAP:
@@ -177,6 +191,7 @@ float4 sampleTextureNative(Texture2D texture, uint nativeSampler, int2 texelBase
         default:
             return texture.SampleLevel(gNearestClampClampSampler, nativeUVCoord, 0.0f);
     }
+#endif
 }
 
 float4 sampleTextureGrad(Texture2D texture, uint nativeSampler, float2 nativeUVCoord, float2 ddxUVNorm, float2 ddyUVNorm) {

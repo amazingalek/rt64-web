@@ -2,6 +2,8 @@
 // RT64
 //
 
+#include "WebGPU.hlsli"
+
 #define BLOCK_SIZE 8
 
 struct BoxFilterCB {
@@ -12,7 +14,7 @@ struct BoxFilterCB {
 
 [[vk::push_constant]] ConstantBuffer<BoxFilterCB> gConstants : register(b0);
 Texture2D<float4> gInput : register(t1);
-RWTexture2D<float4> gOutput : register(u2);
+IMAGE_FORMAT("rgba8") RWTexture2D<float4> gOutput : register(u2);
 
 [numthreads(BLOCK_SIZE, BLOCK_SIZE, 1)]
 void CSMain(uint2 coord : SV_DispatchThreadID) {

@@ -14,7 +14,7 @@ void PSMain(
     , in float2 vertexUV : TEXCOORD
     , in float4 vertexSmoothColor : COLOR0
     , nointerpolation in float4 vertexFlatColor : COLOR1
-    , [[vk::location(0)]] [[vk::index(0)]] out float4 resultColor : SV_TARGET0
+    , [[vk::location(0)]] out float4 resultColor : SV_TARGET0
 )
 {
     int2 pixelPosSeed = floor(vertexPosition.xy);

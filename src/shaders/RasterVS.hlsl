@@ -57,7 +57,12 @@ void VSMain(
     , out float2 oUV : TEXCOORD
     , out float4 oSmoothColor : COLOR0
 #if defined(DYNAMIC_RENDER_PARAMS) || defined(VERTEX_FLAT_COLOR)
+#ifdef WEBGPU
+    // WebGPU requires a vertex output's interpolation to match the fragment input's, which RasterPS declares flat.
+    , nointerpolation out float4 oFlatColor : COLOR1
+#else
     , out float4 oFlatColor : COLOR1
+#endif
 #endif
 )
 {
