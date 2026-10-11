@@ -14,6 +14,40 @@
 //
 // A storage texture in WGSL has a format, and naga guesses rgba32float for one SPIR-V leaves formatless, so
 // IMAGE_FORMAT gives each RWTexture2D the format of the texture RT64 binds to it on WebGPU.
+//
+// WebGPU also guarantees only 8 storage buffers per shader stage, so the RSP compute shaders built with
+// PACKED_RSP_INPUTS read all their inputs from one ByteAddressBuffer, each array at a byte offset of its own (see
+// RSPPackedInputs in rt64_rsp_processor.h). The *At loads read such a buffer at a byte address, on every backend.
+
+uint loadUint32At(ByteAddressBuffer buffer, uint address) {
+    return buffer.Load(address);
+}
+
+float loadFloatAt(ByteAddressBuffer buffer, uint address) {
+    return asfloat(buffer.Load(address));
+}
+
+float4 loadFloat4At(ByteAddressBuffer buffer, uint address) {
+    return asfloat(buffer.Load4(address));
+}
+
+uint loadUint16At(ByteAddressBuffer buffer, uint address) {
+    return (buffer.Load(address & ~3U) >> ((address & 2U) << 3)) & 0xFFFFU;
+}
+
+uint loadUint8At(ByteAddressBuffer buffer, uint address) {
+    return (buffer.Load(address & ~3U) >> ((address & 3U) << 3)) & 0xFFU;
+}
+
+int loadInt8At(ByteAddressBuffer buffer, uint address) {
+    return int(loadUint8At(buffer, address) << 24) >> 24;
+}
+
+// A float4x4 laid out as a StructuredBuffer<float4x4> holds it: column by column, HLSL's default packing.
+float4x4 loadFloat4x4At(ByteAddressBuffer buffer, uint address) {
+    return transpose(float4x4(loadFloat4At(buffer, address), loadFloat4At(buffer, address + 16),
+        loadFloat4At(buffer, address + 32), loadFloat4At(buffer, address + 48)));
+}
 
 #ifdef WEBGPU
 #   define TYPED_BUFFER(T) ByteAddressBuffer
@@ -21,23 +55,23 @@
 #   define IMAGE_FORMAT(F) [[vk::image_format(F)]]
 
 uint loadUint32(ByteAddressBuffer buffer, uint index) {
-    return buffer.Load(index << 2);
+    return loadUint32At(buffer, index << 2);
 }
 
 float loadFloat(ByteAddressBuffer buffer, uint index) {
-    return asfloat(buffer.Load(index << 2));
+    return loadFloatAt(buffer, index << 2);
 }
 
 uint loadUint16(ByteAddressBuffer buffer, uint index) {
-    return (buffer.Load((index << 1) & ~3U) >> ((index & 1U) << 4)) & 0xFFFFU;
+    return loadUint16At(buffer, index << 1);
 }
 
 uint loadUint8(ByteAddressBuffer buffer, uint index) {
-    return (buffer.Load(index & ~3U) >> ((index & 3U) << 3)) & 0xFFU;
+    return loadUint8At(buffer, index);
 }
 
 int loadInt8(ByteAddressBuffer buffer, uint index) {
-    return int(loadUint8(buffer, index) << 24) >> 24;
+    return loadInt8At(buffer, index);
 }
 
 void storeUint16(RWByteAddressBuffer buffer, uint index, uint value) {

@@ -7,14 +7,22 @@
 #include "hle/rt64_workload.h"
 
 #include "rt64_descriptor_sets.h"
+#include "rt64_rsp_processor.h"
 
 namespace RT64 {
     struct VertexProcessor {
+#   if RT64_PACKED_RSP_INPUTS
+        static const uint32_t WorldInputCount = 7;
+#   endif
+
         struct WorldCB {
             uint32_t vertexStart;
             uint32_t vertexCount;
             float prevFrameWeight;
             float curFrameWeight;
+#       if RT64_PACKED_RSP_INPUTS
+            uint32_t inputOffsets[WorldInputCount];
+#       endif
         };
 
         struct ProcessParams {
@@ -28,6 +36,9 @@ namespace RT64 {
 
         WorldCB worldCB;
         std::unique_ptr<RSPWorldDescriptorSet> descriptorSet;
+#   if RT64_PACKED_RSP_INPUTS
+        RSPPackedInputs packedInputs;
+#   endif
 
         VertexProcessor(RenderDevice *device);
         ~VertexProcessor();

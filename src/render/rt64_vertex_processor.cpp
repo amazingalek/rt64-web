@@ -26,6 +26,17 @@ namespace RT64 {
         p.outputBuffers->worldNormBuffer.computedSize += worldCB.vertexCount * sizeof(float) * 4;
         p.outputBuffers->worldVelBuffer.computedSize += worldCB.vertexCount * sizeof(float) * 4;
         
+#   if RT64_PACKED_RSP_INPUTS
+        // In the order of RSPWorldCB's offsets in RSPWorldCS.hlsl.
+        const DrawBuffers &b = *p.drawBuffers;
+        const BufferPair *inputs[WorldInputCount] = {
+            &b.positionBuffer, &b.velocityBuffer, &b.normalColorBuffer, &b.worldIndicesBuffer,
+            &b.worldTransformsBuffer, &b.invTWorldTransformsBuffer, &b.prevWorldTransformsBuffer
+        };
+
+        packedInputs.update(p.worker->device, inputs, worldCB.inputOffsets, WorldInputCount);
+        descriptorSet->setBuffer(descriptorSet->srcInputs, packedInputs.buffer.get(), packedInputs.allocatedSize);
+#   else
         descriptorSet->setBuffer(descriptorSet->srcPos, p.drawBuffers->positionBuffer.get(), p.drawBuffers->positionBuffer.getView(0));
         descriptorSet->setBuffer(descriptorSet->srcVel, p.drawBuffers->velocityBuffer.get(), p.drawBuffers->velocityBuffer.getView(0));
         descriptorSet->setBuffer(descriptorSet->srcNorm, p.drawBuffers->normalColorBuffer.get(), p.drawBuffers->normalColorBuffer.getView(1));
@@ -33,6 +44,7 @@ namespace RT64 {
         descriptorSet->setBuffer(descriptorSet->worldMats, p.drawBuffers->worldTransformsBuffer.get(), RenderBufferStructuredView(sizeof(interop::float4x4)));
         descriptorSet->setBuffer(descriptorSet->invTWorldMats, p.drawBuffers->invTWorldTransformsBuffer.get(), RenderBufferStructuredView(sizeof(interop::float4x4)));
         descriptorSet->setBuffer(descriptorSet->prevWorldMats, p.drawBuffers->prevWorldTransformsBuffer.get(), RenderBufferStructuredView(sizeof(interop::float4x4)));
+#   endif
         descriptorSet->setBuffer(descriptorSet->dstPos, p.outputBuffers->worldPosBuffer.buffer.get(), RenderBufferStructuredView(sizeof(float) * 4));
         descriptorSet->setBuffer(descriptorSet->dstNorm, p.outputBuffers->worldNormBuffer.buffer.get(), RenderBufferStructuredView(sizeof(float) * 4));
         descriptorSet->setBuffer(descriptorSet->dstVel, p.outputBuffers->worldVelBuffer.buffer.get(), RenderBufferStructuredView(sizeof(float) * 4));
@@ -57,6 +69,9 @@ namespace RT64 {
 
         const uint32_t ThreadGroupSize = 64;
         const uint32_t dispatchCount = (worldCB.vertexCount + ThreadGroupSize - 1) / ThreadGroupSize;
+#   if RT64_PACKED_RSP_INPUTS
+        packedInputs.recordCopies(worker->commandList.get());
+#   endif
         worker->commandList->barriers(RenderBarrierStage::COMPUTE, beforeBarriers, uint32_t(std::size(beforeBarriers)));
         worker->commandList->setPipeline(shaderLibrary->rspWorld.pipeline.get());
         worker->commandList->setComputePipelineLayout(shaderLibrary->rspWorld.pipelineLayout.get());

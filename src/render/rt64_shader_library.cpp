@@ -4,6 +4,9 @@
 
 #include "rt64_shader_library.h"
 
+#include "rt64_rsp_processor.h"
+#include "rt64_vertex_processor.h"
+
 #include "common/rt64_common.h"
 #include "shared/rt64_render_target_copy.h"
 #include "shared/rt64_rsp_vertex_test_z.h"
@@ -511,7 +514,7 @@ namespace RT64 {
         {
             RSPProcessDescriptorSet descriptorSet;
             layoutBuilder.begin();
-            layoutBuilder.addPushConstant(0, 0, sizeof(uint32_t) * 4, RenderShaderStageFlag::COMPUTE);
+            layoutBuilder.addPushConstant(0, 0, sizeof(RSPProcessor::ProcessCB), RenderShaderStageFlag::COMPUTE);
             layoutBuilder.addDescriptorSet(descriptorSet);
             layoutBuilder.end();
             rspProcess.pipelineLayout = layoutBuilder.create(device);
@@ -539,7 +542,7 @@ namespace RT64 {
         {
             RSPWorldDescriptorSet descriptorSet;
             layoutBuilder.begin();
-            layoutBuilder.addPushConstant(0, 0, sizeof(uint32_t) * 4, RenderShaderStageFlag::COMPUTE);
+            layoutBuilder.addPushConstant(0, 0, sizeof(VertexProcessor::WorldCB), RenderShaderStageFlag::COMPUTE);
             layoutBuilder.addDescriptorSet(descriptorSet);
             layoutBuilder.end();
             rspWorld.pipelineLayout = layoutBuilder.create(device);

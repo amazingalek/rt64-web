@@ -26,6 +26,19 @@ namespace RT64 {
         p.outputBuffers->screenPosBuffer.computedSize += processCB.vertexCount * sizeof(float) * 4;
         p.outputBuffers->genTexCoordBuffer.computedSize += processCB.vertexCount * sizeof(float) * 2;
         p.outputBuffers->shadedColBuffer.computedSize += processCB.vertexCount * sizeof(float) * 4;
+#   if RT64_PACKED_RSP_INPUTS
+        // In the order of RSPProcessCB's offsets in RSPProcessCS.hlsl.
+        const DrawBuffers &b = *p.drawBuffers;
+        const BufferPair *inputs[ProcessInputCount] = {
+            &b.positionBuffer, &b.velocityBuffer, &b.texcoordBuffer, &b.texcoordVelocityBuffer, &b.normalColorBuffer,
+            &b.viewProjIndicesBuffer, &b.worldIndicesBuffer, &b.fogIndicesBuffer, &b.lightIndicesBuffer, &b.lightCountsBuffer,
+            &b.lookAtIndicesBuffer, &b.rspViewportsBuffer, &b.rspFogBuffer, &b.rspLightsBuffer, &b.rspLookAtBuffer,
+            &b.viewProjTransformsBuffer, &b.worldTransformsBuffer
+        };
+
+        packedInputs.update(p.worker->device, inputs, processCB.inputOffsets, ProcessInputCount);
+        processSet->setBuffer(processSet->srcInputs, packedInputs.buffer.get(), packedInputs.allocatedSize);
+#   else
         processSet->setBuffer(processSet->srcPos, p.drawBuffers->positionBuffer.get(), p.drawBuffers->positionBuffer.getView(0));
         processSet->setBuffer(processSet->srcVel, p.drawBuffers->velocityBuffer.get(), p.drawBuffers->velocityBuffer.getView(0));
         processSet->setBuffer(processSet->srcTc, p.drawBuffers->texcoordBuffer.get(), p.drawBuffers->texcoordBuffer.getView(0));
@@ -44,6 +57,7 @@ namespace RT64 {
         processSet->setBuffer(processSet->rspLookAtVector, p.drawBuffers->rspLookAtBuffer.get(), RenderBufferStructuredView(sizeof(interop::RSPLookAt)));
         processSet->setBuffer(processSet->viewProjTransforms, p.drawBuffers->viewProjTransformsBuffer.get(), RenderBufferStructuredView(sizeof(interop::float4x4)));
         processSet->setBuffer(processSet->worldTransforms, p.drawBuffers->worldTransformsBuffer.get(), RenderBufferStructuredView(sizeof(interop::float4x4)));
+#   endif
         processSet->setBuffer(processSet->dstPos, p.outputBuffers->screenPosBuffer.buffer.get(), RenderBufferStructuredView(sizeof(float) * 4));
         processSet->setBuffer(processSet->dstTc, p.outputBuffers->genTexCoordBuffer.buffer.get(), RenderBufferStructuredView(sizeof(float) * 2));
         processSet->setBuffer(processSet->dstCol, p.outputBuffers->shadedColBuffer.buffer.get(), RenderBufferStructuredView(sizeof(float) * 4));
@@ -71,6 +85,9 @@ namespace RT64 {
             };
 
             const int dispatchCount = (processCB.vertexCount + ThreadGroupSize - 1) / ThreadGroupSize;
+#       if RT64_PACKED_RSP_INPUTS
+            packedInputs.recordCopies(worker->commandList.get());
+#       endif
             worker->commandList->barriers(RenderBarrierStage::COMPUTE, beforeBarriers, uint32_t(std::size(beforeBarriers)));
             worker->commandList->setPipeline(shaderLibrary->rspProcess.pipeline.get());
             worker->commandList->setComputePipelineLayout(shaderLibrary->rspProcess.pipelineLayout.get());

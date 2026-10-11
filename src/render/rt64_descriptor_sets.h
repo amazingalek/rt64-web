@@ -564,6 +564,9 @@ namespace RT64 {
     };
 
     struct RSPProcessDescriptorSet : RenderDescriptorSetBase {
+#   if RT64_PACKED_RSP_INPUTS
+        uint32_t srcInputs;
+#   else
         uint32_t srcPos;
         uint32_t srcVel;
         uint32_t srcTc;
@@ -582,12 +585,16 @@ namespace RT64 {
         uint32_t rspLookAtVector;
         uint32_t viewProjTransforms;
         uint32_t worldTransforms;
+#   endif
         uint32_t dstPos;
         uint32_t dstTc;
         uint32_t dstCol;
 
         RSPProcessDescriptorSet(RenderDevice *device = nullptr) {
             builder.begin();
+#       if RT64_PACKED_RSP_INPUTS
+            srcInputs = builder.addByteAddressBuffer(1);
+#       else
             srcPos = builder.addFormattedBuffer(1);
             srcVel = builder.addFormattedBuffer(2);
             srcTc = builder.addFormattedBuffer(3);
@@ -606,6 +613,7 @@ namespace RT64 {
             rspLookAtVector = builder.addStructuredBuffer(16);
             viewProjTransforms = builder.addStructuredBuffer(17);
             worldTransforms = builder.addStructuredBuffer(18);
+#       endif
             dstPos = builder.addReadWriteStructuredBuffer(19);
             dstTc = builder.addReadWriteStructuredBuffer(20);
             dstCol = builder.addReadWriteStructuredBuffer(21);
@@ -656,6 +664,9 @@ namespace RT64 {
     };
 
     struct RSPWorldDescriptorSet : RenderDescriptorSetBase {
+#   if RT64_PACKED_RSP_INPUTS
+        uint32_t srcInputs;
+#   else
         uint32_t srcPos;
         uint32_t srcVel;
         uint32_t srcNorm;
@@ -663,12 +674,16 @@ namespace RT64 {
         uint32_t worldMats;
         uint32_t invTWorldMats;
         uint32_t prevWorldMats;
+#   endif
         uint32_t dstPos;
         uint32_t dstNorm;
         uint32_t dstVel;
 
         RSPWorldDescriptorSet(RenderDevice *device = nullptr) {
             builder.begin();
+#       if RT64_PACKED_RSP_INPUTS
+            srcInputs = builder.addByteAddressBuffer(1);
+#       else
             srcPos = builder.addFormattedBuffer(1);
             srcVel = builder.addFormattedBuffer(2);
             srcNorm = builder.addFormattedBuffer(3);
@@ -676,6 +691,7 @@ namespace RT64 {
             worldMats = builder.addStructuredBuffer(5);
             invTWorldMats = builder.addStructuredBuffer(6);
             prevWorldMats = builder.addStructuredBuffer(7);
+#       endif
             dstPos = builder.addReadWriteStructuredBuffer(8);
             dstNorm = builder.addReadWriteStructuredBuffer(9);
             dstVel = builder.addReadWriteStructuredBuffer(10);

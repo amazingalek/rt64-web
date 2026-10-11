@@ -14,6 +14,7 @@ option(RT64_STATIC "Build RT64 as a static library" OFF)
 option(RT64_WGSL "Compile the shaders to WGSL for WebGPU, in place of DXIL, SPIR-V and Metal (always on with Emscripten)" OFF)
 option(RT64_SDL_WINDOW_VULKAN "Build RT64 to expect an SDL Window outside of Windows" OFF)
 option(RT64_PER_DRAW_TEXTURES "Bind textures per draw on every device, as devices without descriptor indexing (WebGPU) need; to test that path" OFF)
+option(RT64_PACKED_RSP_INPUTS "Gather the RSP compute shaders' inputs into one buffer on every device, as WebGPU's 8 storage buffers per stage need; to test that path" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -133,6 +134,12 @@ set (DXC_COMMON_OPTS "-I${PROJECT_SOURCE_DIR}/src")
 # WebGPU has no descriptor indexing, so its shaders always bind textures per draw (TextureSampler.hlsli).
 if (RT64_PER_DRAW_TEXTURES OR RT64_WGSL)
     list(APPEND DXC_COMMON_OPTS "-D" "PER_DRAW_TEXTURES")
+endif()
+# WebGPU guarantees 8 storage buffers per shader stage, so the RSP compute shaders read their inputs from one
+# (RSPPackedInputs, rt64_rsp_processor.h).
+if (RT64_PACKED_RSP_INPUTS OR RT64_WGSL)
+    set (RT64_PACKED_RSP_INPUTS ON)
+    list(APPEND DXC_COMMON_OPTS "-D" "PACKED_RSP_INPUTS")
 endif()
 set (DXC_DXIL_OPTS "-Wno-ignored-attributes")
 set (DXC_SPV_OPTS "-spirv" "-fspv-target-env=vulkan1.0" "-fvk-use-dx-layout")
@@ -498,6 +505,10 @@ set_target_properties(rt64 PROPERTIES PREFIX "")
 
 if (RT64_PER_DRAW_TEXTURES)
     target_compile_definitions(rt64 PUBLIC RT64_PER_DRAW_TEXTURES=1)
+endif()
+
+if (RT64_PACKED_RSP_INPUTS)
+    target_compile_definitions(rt64 PUBLIC RT64_PACKED_RSP_INPUTS=1)
 endif()
 
 # Add common libraries.
