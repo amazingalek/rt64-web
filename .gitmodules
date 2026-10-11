@@ -3,7 +3,8 @@
 	url = https://github.com/epezent/implot
 [submodule "src/contrib/hlslpp"]
 	path = src/contrib/hlslpp
-	url = https://github.com/redorav/hlslpp
+	url = https://github.com/amazingalek/hlslpp-web
+	branch = web
 [submodule "src/contrib/xess"]
 	path = src/contrib/xess
 	url = https://github.com/intel/xess
