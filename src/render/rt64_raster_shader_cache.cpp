@@ -6,12 +6,10 @@
 
 #include "common/rt64_thread.h"
 
-// WebGPU builds every pipeline in the browser's GPU process, which does nothing else meanwhile, so no frame is drawn
-// or read back. A specialized RasterPS takes 1.4-2 s there each time (Chrome, RTX 2070), and the ubershader 2 s once
-// and a few ms for each further render state, so a WGSL build draws with the ubershader only.
-#if !defined(RT64_WGSL)
+// On WebGPU a specialized RasterPS takes 1.4-2 s to build in the browser's GPU process (Chrome, RTX 2070). plume's
+// WebGPU backend builds it with createRenderPipelineAsync and the compilation thread waits for it, so the ubershader
+// draws meanwhile, as everywhere else.
 #define ENABLE_OPTIMIZED_SHADER_GENERATION
-#endif
 
 namespace RT64 {
     // RasterShaderCache::CompilationThread
@@ -65,7 +63,7 @@ namespace RT64 {
                 assert((shaderCache->shaderUber != nullptr) && "Ubershader should've been created by the time a new shader is submitted to the cache.");
                 const RenderPipelineLayout *uberPipelineLayout = shaderCache->shaderUber->pipelineLayout.get();
                 const RenderMultisampling multisampling = shaderCache->multisampling;
-                std::unique_ptr<RasterShader> newShader = std::make_unique<RasterShader>(shaderCache->device, shaderDesc, uberPipelineLayout, shaderCache->shaderFormat, multisampling, shaderCache->shaderCompiler.get(), &shaderCache->optimizerCacheSPIRV);
+                std::unique_ptr<RasterShader> newShader = std::make_unique<RasterShader>(shaderCache->device, shaderDesc, uberPipelineLayout, shaderCache->shaderFormat, multisampling, shaderCache->shaderCompiler.get(), &shaderCache->optimizerCacheSPIRV, &shaderCache->shaderCacheWGSL);
 
                 {
                     const std::unique_lock<std::mutex> lock(shaderCache->GPUShadersMutex);
@@ -114,10 +112,20 @@ namespace RT64 {
         if (shaderFormat == RenderShaderFormat::SPIRV) {
             optimizerCacheSPIRV.initialize();
         }
+
+        // Create the spec constant shaders before anything draws. plume's WebGPU backend learns from each new shader which
+        // stages read which bindings, and when that changes every pipeline gets a new layout: the specialized ones that
+        // were drawn with would then be built again in place, holding up the browser's GPU process for seconds.
+        if (shaderFormat == RenderShaderFormat::WGSL) {
+            const RenderShader *vertexShader = nullptr;
+            const RenderShader *pixelShader = nullptr;
+            for (bool smoothShade : { false, true }) {
+                shaderCacheWGSL.get(device, smoothShade, multisampling.sampleCount > 1, vertexShader, pixelShader);
+            }
+        }
     }
 
     void RasterShaderCache::submit(const ShaderDescription &desc) {
-#   ifdef ENABLE_OPTIMIZED_SHADER_GENERATION
         {
             std::unique_lock<std::mutex> queueLock(submissionMutex);
 
@@ -138,7 +146,6 @@ namespace RT64 {
         }
 
         descQueueChanged.notify_all();
-#   endif
     }
     
     void RasterShaderCache::waitForAll() {

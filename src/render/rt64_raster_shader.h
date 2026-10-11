@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 
 #include "re-spirv/re-spirv.h"
 
@@ -39,6 +40,17 @@ namespace RT64 {
         void initialize();
     };
 
+    // The spec constant shaders a WGSL build specializes with override values, each created once: they are the same
+    // source for every shader, and creating a RasterPS module (over 1 MB of WGSL) costs the browser a parse each time.
+    struct ShaderCacheWGSL {
+        std::mutex mutex;
+        std::unordered_map<const void *, std::unique_ptr<RenderShader>> shaders;
+
+        // The vertex and pixel shader for a shading mode, created on first use.
+        void get(RenderDevice *device, bool smoothShade, bool useMSAA, const RenderShader *&vertexShader, const RenderShader *&pixelShader);
+        const RenderShader *get(RenderDevice *device, const void *blob, uint64_t size, const char *entryPointName);
+    };
+
     struct PipelineCreation {
         RenderDevice *device;
         const RenderPipelineLayout *pipelineLayout;
@@ -53,6 +65,7 @@ namespace RT64 {
         bool usesHDR;
         std::vector<RenderSpecConstant> specConstants;
         RenderMultisampling multisampling;
+        bool buildInBackground = false;
     };
 
     struct RasterShaderText {
@@ -66,7 +79,7 @@ namespace RT64 {
         std::unique_ptr<RenderPipeline> pipeline;
 
         RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, 
-            const ShaderCompiler *shaderCompiler, const OptimizerCacheSPIRV *optimizerCacheSPIRV);
+            const ShaderCompiler *shaderCompiler, const OptimizerCacheSPIRV *optimizerCacheSPIRV, ShaderCacheWGSL *shaderCacheWGSL);
 
         ~RasterShader();
         static RasterShaderText generateShaderText(const ShaderDescription &desc, bool multisampling);
