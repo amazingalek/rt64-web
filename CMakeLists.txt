@@ -12,6 +12,7 @@ option(RT64_STATIC "Build RT64 as a static library" OFF)
 
 
 option(RT64_SDL_WINDOW_VULKAN "Build RT64 to expect an SDL Window outside of Windows" OFF)
+option(RT64_PER_DRAW_TEXTURES "Bind textures per draw on every device, as devices without descriptor indexing (WebGPU) need; to test that path" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -104,6 +105,10 @@ set(ANDROID_ABI arm64-v8a)
 
 # For DXC
 set (DXC_COMMON_OPTS "-I${PROJECT_SOURCE_DIR}/src")
+# WebGPU has no descriptor indexing, so its shaders always bind textures per draw (TextureSampler.hlsli).
+if (RT64_PER_DRAW_TEXTURES OR EMSCRIPTEN)
+    list(APPEND DXC_COMMON_OPTS "-D" "PER_DRAW_TEXTURES")
+endif()
 set (DXC_DXIL_OPTS "-Wno-ignored-attributes")
 set (DXC_SPV_OPTS "-spirv" "-fspv-target-env=vulkan1.0" "-fvk-use-dx-layout")
 set (DXC_LB_OPTS "${DXC_COMMON_OPTS}" "-D" "LIBRARY" "-T" "lib_6_3")
@@ -438,6 +443,10 @@ endif()
 
 set_target_properties(rt64 PROPERTIES OUTPUT_NAME "rt64")
 set_target_properties(rt64 PROPERTIES PREFIX "")
+
+if (RT64_PER_DRAW_TEXTURES)
+    target_compile_definitions(rt64 PUBLIC RT64_PER_DRAW_TEXTURES=1)
+endif()
 
 # Add common libraries.
 target_link_libraries(rt64 re-spirv)

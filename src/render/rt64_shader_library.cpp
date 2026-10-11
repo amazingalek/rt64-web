@@ -855,12 +855,10 @@ namespace RT64 {
         // Raytracing debug.
         {
             FramebufferRendererDescriptorCommonSet descriptorCommonSet(samplerLibrary, deviceCapabilities.raytracing);
-            FramebufferRendererDescriptorTextureSet descriptorTextureSet;
             FramebufferRendererDescriptorFramebufferSet descriptorFramebufferSet;
             layoutBuilder.begin();
             layoutBuilder.addDescriptorSet(descriptorCommonSet);
-            layoutBuilder.addDescriptorSet(descriptorTextureSet);
-            layoutBuilder.addDescriptorSet(descriptorTextureSet);
+            addFramebufferRendererTextureSets(layoutBuilder, deviceCapabilities);
             layoutBuilder.addDescriptorSet(descriptorFramebufferSet);
             layoutBuilder.end();
             debug.pipelineLayout = layoutBuilder.create(device);

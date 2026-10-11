@@ -311,6 +311,64 @@ namespace RT64 {
         }
     };
 
+    // Without descriptor indexing (WebGPU has none), sets 1 and 2 of the framebuffer renderer are a set per draw with
+    // the textures of its tiles, one slot per tile, and one buffer with every texture cache entry's TMEM in it, instead
+    // of the texture cache bound twice. The RT64_PER_DRAW_TEXTURES build does this on every device, to test it.
+    // See TextureSampler.hlsli and FramebufferRenderer::updateDrawTextureSets.
+    inline bool perDrawTextures(const RenderDeviceCapabilities &capabilities) {
+#   if RT64_PER_DRAW_TEXTURES
+        return true;
+#   else
+        return !capabilities.descriptorIndexing;
+#   endif
+    }
+
+    struct FramebufferRendererDescriptorDrawTextureSet : RenderDescriptorSetBase {
+        static const uint32_t TileCount = 8;
+
+        uint32_t gTileTextures[TileCount];
+
+        FramebufferRendererDescriptorDrawTextureSet(RenderDevice *device = nullptr) {
+            builder.begin();
+            for (uint32_t i = 0; i < TileCount; i++) {
+                gTileTextures[i] = builder.addTexture(i);
+            }
+
+            builder.end();
+
+            if (device != nullptr) {
+                create(device);
+            }
+        }
+    };
+
+    struct FramebufferRendererDescriptorTMEMSet : RenderDescriptorSetBase {
+        uint32_t gTMEMPool;
+
+        FramebufferRendererDescriptorTMEMSet(RenderDevice *device = nullptr) {
+            builder.begin();
+            gTMEMPool = builder.addByteAddressBuffer(0);
+            builder.end();
+
+            if (device != nullptr) {
+                create(device);
+            }
+        }
+    };
+
+    // Sets 1 and 2 of a pipeline layout for the framebuffer renderer's shaders.
+    inline void addFramebufferRendererTextureSets(RenderPipelineLayoutBuilder &layoutBuilder, const RenderDeviceCapabilities &capabilities) {
+        if (perDrawTextures(capabilities)) {
+            layoutBuilder.addDescriptorSet(FramebufferRendererDescriptorDrawTextureSet());
+            layoutBuilder.addDescriptorSet(FramebufferRendererDescriptorTMEMSet());
+        }
+        else {
+            FramebufferRendererDescriptorTextureSet descriptorTextureSet;
+            layoutBuilder.addDescriptorSet(descriptorTextureSet);
+            layoutBuilder.addDescriptorSet(descriptorTextureSet);
+        }
+    }
+
     struct FramebufferRendererDescriptorFramebufferSet : RenderDescriptorSetBase {
         uint32_t FbParams;
         uint32_t gBackgroundColor;

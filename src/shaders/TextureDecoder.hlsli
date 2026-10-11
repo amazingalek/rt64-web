@@ -14,18 +14,24 @@
 #define RDP_TMEM_MASK8 0xFFF
 #define RDP_TMEM_MASK16 0x7FF
 
-uint implLoadTMEM(uint relativeAddress, uint maskAddress, uint orAddress, bool oddRow, uint textureStart, uint rowSize, Texture1D<uint> TMEM) {
+// TMEM is a 1D R8_UINT texture unless the includer reads it from somewhere else (FbRendererCommon.hlsli).
+#ifndef TMEM_SOURCE
+#define TMEM_SOURCE Texture1D<uint>
+#define TMEM_LOAD(TMEM, address) TMEM.Load(int2(address, 0))
+#endif
+
+uint implLoadTMEM(uint relativeAddress, uint maskAddress, uint orAddress, bool oddRow, uint textureStart, uint rowSize, TMEM_SOURCE TMEM) {
     const uint rowStart = (relativeAddress / rowSize) * rowSize;
     const uint wordIndex = (relativeAddress - rowStart) / 4;
     const uint swapWordIndex = wordIndex ^ 1;
     const uint finalAddress = select_uint(oddRow,
         textureStart + rowStart + (swapWordIndex * 4) + (relativeAddress & 0x3),
         textureStart + relativeAddress);
-    return TMEM.Load(int2(((finalAddress & maskAddress) | orAddress) & RDP_TMEM_MASK8, 0));
+    return TMEM_LOAD(TMEM, ((finalAddress & maskAddress) | orAddress) & RDP_TMEM_MASK8);
 }
 
 #define loadTMEMMasked(relativeAddress, mask, orAddress) implLoadTMEM(relativeAddress, mask, orAddress, oddRow, address, stride, TMEM)
-#define loadTLUT(paletteAddress) TMEM.Load(uint2((paletteAddress) & RDP_TMEM_MASK8, 0))
+#define loadTLUT(paletteAddress) TMEM_LOAD(TMEM, (paletteAddress) & RDP_TMEM_MASK8)
 
 float4 sampleTMEMIA4(uint pixelValue4bit) {
     return IA4ToFloat4(pixelValue4bit);
@@ -146,7 +152,7 @@ float4 sampleTMEM32b(bool oddColumn, uint pixelValue0, uint pixelValue1, uint pi
     }
 }
 
-float4 sampleTMEM(int2 texelInt, uint siz, uint fmt, uint address, uint stride, uint tlut, uint palette, Texture1D<uint> TMEM) {
+float4 sampleTMEM(int2 texelInt, uint siz, uint fmt, uint address, uint stride, uint tlut, uint palette, TMEM_SOURCE TMEM) {
     const bool oddRow = (texelInt.y & 1);
     const bool oddColumn = (texelInt.x & 1);
     const bool isRgba32 = and(fmt == G_IM_FMT_RGBA, siz == G_IM_SIZ_32b);

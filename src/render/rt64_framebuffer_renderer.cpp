@@ -151,6 +151,7 @@ namespace RT64 {
 
         shaderUploader = std::make_unique<BufferUploader>(worker->device);
         descCommonSet = std::make_unique<FramebufferRendererDescriptorCommonSet>(shaderLibrary->samplerLibrary, worker->device->getCapabilities().raytracing, worker->device);
+        usePerDrawTextures = perDrawTextures(worker->device->getCapabilities());
 
 #   if RT_ENABLED
         if (rtSupport) {
@@ -161,6 +162,8 @@ namespace RT64 {
     }
 
     FramebufferRenderer::~FramebufferRenderer() {
+        drawTextureSets.clear();
+        dummyTileTexture.reset();
         dummyColorTargetView.reset();
         dummyDepthTargetView.reset();
         dummyColorTarget.reset();
@@ -310,12 +313,12 @@ namespace RT64 {
         assert(worker != nullptr);
         assert(drawBuffers != nullptr);
         
-        const bool createSet = (descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1));
+        const bool createSet = !usePerDrawTextures && ((descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1)));
         if (createSet) {
             descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, ((textureCacheSize + 1) * 3) / 2);
         }
 
-        if (createSet || (descriptorTextureReplacementMapEnabled != textureCacheReplacementMapEnabled)) {
+        if (!usePerDrawTextures && (createSet || (descriptorTextureReplacementMapEnabled != textureCacheReplacementMapEnabled))) {
             descriptorTextureVersions.clear();
             descriptorTextureGlobalVersion = 0;
             descriptorTextureReplacementMapEnabled = textureCacheReplacementMapEnabled;
@@ -377,6 +380,11 @@ namespace RT64 {
         descCommonSet->setBuffer(descCommonSet->RDPTiles, drawBuffers->rdpTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::RDPTile)));
         descCommonSet->setBuffer(descCommonSet->GPUTiles, drawBuffers->gpuTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::GPUTile)));
         descCommonSet->setBuffer(descCommonSet->DynamicRenderParams, drawBuffers->renderParamsBuffer.get(), RenderBufferStructuredView(sizeof(interop::RenderParams)));
+
+        // The textures are bound per draw instead, by updateDrawTextureSets().
+        if (usePerDrawTextures) {
+            return;
+        }
 
         // Make sure the versions vector matches the texture cache size.
         descriptorTextureVersions.resize(textureCacheSize, 0);
@@ -473,6 +481,7 @@ namespace RT64 {
         interop::RasterParams rasterParams;
         RenderDescriptorSet *descRealFbSet = framebuffer.descRealFbSet->get();
         RenderDescriptorSet *descDummyFbSet = framebuffer.descDummyFbSet->get();
+        const RenderDescriptorSet *previousDrawTextureSet = nullptr;
 
         auto switchToGraphicsPipeline = [&]() {
             previousCallType = InstanceDrawCall::Type::Unknown;
@@ -481,8 +490,15 @@ namespace RT64 {
             previousScissor = RenderRect();
             worker->commandList->setGraphicsPipelineLayout(rendererPipelineLayout);
             worker->commandList->setGraphicsDescriptorSet(descCommonSet->get(), 0);
-            worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 1);
-            worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 2);
+            if (usePerDrawTextures) {
+                previousDrawTextureSet = nullptr;
+                worker->commandList->setGraphicsDescriptorSet(descTMEMSet->get(), 2);
+            }
+            else {
+                worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 1);
+                worker->commandList->setGraphicsDescriptorSet(descTextureSet->get(), 2);
+            }
+
             worker->commandList->setGraphicsDescriptorSet(depthState ? descRealFbSet : descDummyFbSet, 3);
             worker->commandList->setViewports(framebuffer.viewport);
         };
@@ -569,6 +585,14 @@ namespace RT64 {
                 if (previousPipeline != triangles.pipeline) {
                     worker->commandList->setPipeline(triangles.pipeline);
                     previousPipeline = triangles.pipeline;
+                }
+
+                if (usePerDrawTextures) {
+                    RenderDescriptorSet *drawTextureSet = drawTextureSets[drawTextureSetIndices[i]]->get();
+                    if (previousDrawTextureSet != drawTextureSet) {
+                        worker->commandList->setGraphicsDescriptorSet(drawTextureSet, 1);
+                        previousDrawTextureSet = drawTextureSet;
+                    }
                 }
                 
                 rasterParams.renderIndex = i;
@@ -1760,7 +1784,185 @@ namespace RT64 {
         checkRasterScene(rasterScene);
     }
 
-    void FramebufferRenderer::endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, bool rtEnabled) {
+    size_t FramebufferRenderer::DrawTextureStampsHash::operator()(const DrawTextureStamps &stamps) const {
+        size_t hash = 0;
+        for (uint64_t stamp : stamps) {
+            hash ^= std::hash<uint64_t>()(stamp) + 0x9E3779B97F4A7C15ULL + (hash << 6) + (hash >> 2);
+        }
+
+        return hash;
+    }
+
+    // Without descriptor indexing: finds the texture at every texture cache index that changed, and writes the TMEM of
+    // the entries that are only TMEM into the pool, uploading the range that changed. An entry the cache emptied keeps
+    // its version (eviction doesn't change it), so indexTextures can still hold its deleted texture: only an index the
+    // cache has a texture at this workload is read from it (updateDrawTextureSets).
+    void FramebufferRenderer::updateIndexTextures(std::vector<BufferUploader::Upload> &shaderUploads) {
+        if (descriptorTextureReplacementMapEnabled != textureCacheReplacementMapEnabled) {
+            descriptorTextureVersions.clear();
+            descriptorTextureGlobalVersion = 0;
+            descriptorTextureReplacementMapEnabled = textureCacheReplacementMapEnabled;
+        }
+
+        const uint32_t cacheTextureCount = uint32_t(textureCacheVersions.size());
+        descriptorTextureVersions.resize(cacheTextureCount, 0);
+        indexTextures.resize(cacheTextureCount);
+        if (tmemPoolBytes.size() < (std::max(cacheTextureCount, 1U) * TMEMBytes)) {
+            tmemPoolBytes.resize(std::max(cacheTextureCount, 1U) * TMEMBytes, 0);
+        }
+
+        uint32_t tmemFirst = UINT32_MAX;
+        uint32_t tmemLast = 0;
+        if (descriptorTextureGlobalVersion != textureCacheGlobalVersion) {
+            for (uint32_t i = 0; i < cacheTextureCount; i++) {
+                if (textureCacheVersions[i] == descriptorTextureVersions[i]) {
+                    continue;
+                }
+
+                descriptorTextureVersions[i] = textureCacheVersions[i];
+                DrawTexture &indexTexture = indexTextures[i];
+                indexTexture = DrawTexture();
+                const Texture *cacheTexture = textureCacheTextures[i];
+                if (cacheTexture == nullptr) {
+                    continue;
+                }
+
+                if (textureCacheReplacementMapEnabled && (textureCacheTextureReplacements[i] != nullptr)) {
+                    indexTexture.texture = textureCacheTextureReplacements[i]->texture.get();
+                }
+                else if (cacheTexture->texture != nullptr) {
+                    indexTexture.texture = cacheTexture->texture.get();
+                }
+                else {
+                    uint8_t *poolBytes = &tmemPoolBytes[size_t(i) * TMEMBytes];
+                    const size_t byteCount = std::min(cacheTexture->bytesTMEM.size(), size_t(TMEMBytes));
+                    memcpy(poolBytes, cacheTexture->bytesTMEM.data(), byteCount);
+                    memset(poolBytes + byteCount, 0, TMEMBytes - byteCount);
+                    tmemFirst = std::min(tmemFirst, i);
+                    tmemLast = std::max(tmemLast, i);
+                }
+
+                indexTexture.stamp = ++drawTextureStampCounter;
+            }
+
+            descriptorTextureGlobalVersion = textureCacheGlobalVersion;
+        }
+
+        // The pool must exist to be bound, even with no TMEM in it.
+        if (tmemPoolBuffer.defaultBuffer == nullptr) {
+            tmemFirst = std::min(tmemFirst, 0U);
+        }
+
+        if (tmemFirst <= tmemLast) {
+            shaderUploads.push_back({ tmemPoolBytes.data(), { tmemFirst, tmemLast + 1 }, TMEMBytes, RenderBufferFlag::STORAGE, { }, &tmemPoolBuffer });
+        }
+    }
+
+    // Without descriptor indexing: gives every draw a set with the textures of its tiles, a slot per tile, shared by
+    // the draws that use the same textures. Sets are kept from one workload to the next and only the slots whose
+    // texture changed are written, since WebGPU makes a new bind group for a set that changed. A slot with no texture
+    // (no tile, a TMEM tile, or a tile past the draw's) gets a blank one, so every set has the same layout.
+    void FramebufferRenderer::updateDrawTextureSets(RenderWorker *worker, const std::vector<interop::GPUTile> &gpuTiles) {
+        if (dummyTileTexture == nullptr) {
+            dummyTileTexture = worker->device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, RenderFormat::R8G8B8A8_UNORM));
+            dummyTileTexture->setName("Framebuffer Renderer Tile Dummy");
+        }
+
+        if (!dummyTileTextureTransitioned) {
+            worker->commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(dummyTileTexture.get(), RenderTextureLayout::SHADER_READ));
+            dummyTileTextureTransitioned = true;
+        }
+
+        if (descTMEMSet == nullptr) {
+            descTMEMSet = std::make_unique<FramebufferRendererDescriptorTMEMSet>(worker->device);
+        }
+
+        if (tmemPoolBufferBound != tmemPoolBuffer.get()) {
+            descTMEMSet->setBuffer(descTMEMSet->gTMEMPool, tmemPoolBuffer.get(), tmemPoolBuffer.allocatedSize);
+            tmemPoolBufferBound = tmemPoolBuffer.get();
+        }
+
+        // Tile copies and render targets are put at an index for this workload only, a free one of the cache's or one
+        // past its end, and may be gone by the next.
+        dynamicIndexTextures.clear();
+        for (const DynamicTextureView &dynamicView : dynamicTextureViewVector) {
+            dynamicIndexTextures[dynamicView.dstIndex] = { dynamicView.texture, dynamicView.textureView, ++drawTextureStampCounter };
+        }
+
+        auto indexTexture = [&](uint32_t textureIndex) -> const DrawTexture * {
+            auto dynamicIt = dynamicIndexTextures.find(textureIndex);
+            if (dynamicIt != dynamicIndexTextures.end()) {
+                return &dynamicIt->second;
+            }
+
+            const bool inCache = (textureIndex < textureCacheTextures.size()) && (textureCacheTextures[textureIndex] != nullptr);
+            if (inCache && (textureIndex < indexTextures.size()) && (indexTextures[textureIndex].texture != nullptr)) {
+                return &indexTextures[textureIndex];
+            }
+
+            return nullptr;
+        };
+
+        const DrawTexture dummyTexture = { dummyTileTexture.get(), nullptr, 0 };
+        const uint32_t TileCount = FramebufferRendererDescriptorDrawTextureSet::TileCount;
+        const uint32_t drawCount = uint32_t(std::min(instanceDrawCallVector.size(), renderIndicesVector.size()));
+        uint32_t setCount = 0;
+        drawTextureSetMap.clear();
+        drawTextureSetIndices.assign(instanceDrawCallVector.size(), 0);
+        for (uint32_t i = 0; i < drawCount; i++) {
+            switch (instanceDrawCallVector[i].type) {
+            case InstanceDrawCall::Type::IndexedTriangles:
+            case InstanceDrawCall::Type::RawTriangles:
+            case InstanceDrawCall::Type::RegularRect:
+                break;
+            default:
+                continue;
+            }
+
+            std::array<DrawTexture, TileCount> drawTextures;
+            DrawTextureStamps drawStamps;
+            const interop::RenderIndices &renderIndices = renderIndicesVector[i];
+            for (uint32_t t = 0; t < TileCount; t++) {
+                const uint32_t tileIndex = renderIndices.rdpTileIndex + t;
+                drawTextures[t] = dummyTexture;
+                if ((t < renderIndices.rdpTileCount) && (tileIndex < gpuTiles.size())) {
+                    const DrawTexture *tileTexture = indexTexture(gpuTiles[tileIndex].textureIndex);
+                    if (tileTexture != nullptr) {
+                        drawTextures[t] = *tileTexture;
+                    }
+                }
+
+                drawStamps[t] = drawTextures[t].stamp;
+            }
+
+            auto it = drawTextureSetMap.find(drawStamps);
+            if (it != drawTextureSetMap.end()) {
+                drawTextureSetIndices[i] = it->second;
+                continue;
+            }
+
+            if (setCount == drawTextureSets.size()) {
+                drawTextureSets.emplace_back(std::make_unique<FramebufferRendererDescriptorDrawTextureSet>(worker->device));
+                DrawTextureStamps unwrittenStamps;
+                unwrittenStamps.fill(UINT64_MAX);
+                drawTextureSetStamps.emplace_back(unwrittenStamps);
+            }
+
+            FramebufferRendererDescriptorDrawTextureSet *drawTextureSet = drawTextureSets[setCount].get();
+            DrawTextureStamps &setStamps = drawTextureSetStamps[setCount];
+            for (uint32_t t = 0; t < TileCount; t++) {
+                if (setStamps[t] != drawStamps[t]) {
+                    drawTextureSet->setTexture(drawTextureSet->gTileTextures[t], drawTextures[t].texture, RenderTextureLayout::SHADER_READ, drawTextures[t].textureView);
+                    setStamps[t] = drawStamps[t];
+                }
+            }
+
+            drawTextureSetMap.emplace(drawStamps, setCount);
+            drawTextureSetIndices[i] = setCount++;
+        }
+    }
+
+    void FramebufferRenderer::endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, const std::vector<interop::GPUTile> &gpuTiles, bool rtEnabled) {
         bool shaderViewRtEnabled = false;
         std::vector<BufferUploader::Upload> shaderUploads = {
             { renderIndicesVector.data(), { 0, renderIndicesVector.size() }, sizeof(interop::RenderIndices), RenderBufferFlag::STORAGE, { }, &renderIndicesBuffer},
@@ -1816,8 +2018,16 @@ namespace RT64 {
         }
 #   endif
 
+        if (usePerDrawTextures) {
+            updateIndexTextures(shaderUploads);
+        }
+
         shaderUploader->submit(worker, shaderUploads);
         updateShaderViews(worker, drawBuffers, outputBuffers, shaderViewRtEnabled);
+
+        if (usePerDrawTextures) {
+            updateDrawTextureSets(worker, gpuTiles);
+        }
     }
 
     void FramebufferRenderer::advanceFrame(bool rtEnabled) {

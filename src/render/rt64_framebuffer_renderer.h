@@ -98,6 +98,37 @@ namespace RT64 {
         std::vector<uint32_t> descriptorTextureVersions;
         uint32_t descriptorTextureGlobalVersion = 0;
         bool descriptorTextureReplacementMapEnabled = false;
+
+        // Without descriptor indexing, in place of descTextureSet (see perDrawTextures() in rt64_descriptor_sets.h).
+        // A stamp is unique to each time a texture was put at an index, so a set is rewritten when a texture it holds
+        // was replaced, even by one at the same address.
+        struct DrawTexture {
+            const RenderTexture *texture = nullptr;
+            const RenderTextureView *textureView = nullptr;
+            uint64_t stamp = 0;
+        };
+
+        typedef std::array<uint64_t, FramebufferRendererDescriptorDrawTextureSet::TileCount> DrawTextureStamps;
+
+        struct DrawTextureStampsHash {
+            size_t operator()(const DrawTextureStamps &stamps) const;
+        };
+
+        static const uint32_t TMEMBytes = 0x1000;
+        bool usePerDrawTextures = false;
+        uint64_t drawTextureStampCounter = 0;
+        std::vector<DrawTexture> indexTextures;
+        std::unordered_map<uint32_t, DrawTexture> dynamicIndexTextures;
+        std::vector<uint8_t> tmemPoolBytes;
+        BufferPair tmemPoolBuffer;
+        const RenderBuffer *tmemPoolBufferBound = nullptr;
+        std::unique_ptr<FramebufferRendererDescriptorTMEMSet> descTMEMSet;
+        std::vector<std::unique_ptr<FramebufferRendererDescriptorDrawTextureSet>> drawTextureSets;
+        std::vector<DrawTextureStamps> drawTextureSetStamps;
+        std::vector<uint32_t> drawTextureSetIndices;
+        std::unordered_map<DrawTextureStamps, uint32_t, DrawTextureStampsHash> drawTextureSetMap;
+        std::unique_ptr<RenderTexture> dummyTileTexture;
+        bool dummyTileTextureTransitioned = false;
         std::unique_ptr<RSPSmoothNormalDescriptorSet> smoothDescSet;
         std::unique_ptr<RSPVertexTestZDescriptorSet> vertexTestZSet;
         interop::FrameParams frameParams;
@@ -166,7 +197,9 @@ namespace RT64 {
         bool submitDepthAccess(RenderWorker *worker, RenderFramebufferStorage *fbStorage, bool readOnly, bool &depthState);
         void submitRasterScene(RenderWorker *worker, const Framebuffer &framebuffer, RenderFramebufferStorage *fbStorage, const RasterScene &rasterScene, bool &depthState);
         void addFramebuffer(const DrawParams &p);
-        void endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, bool rtEnabled);
+        void updateIndexTextures(std::vector<BufferUploader::Upload> &shaderUploads);
+        void updateDrawTextureSets(RenderWorker *worker, const std::vector<interop::GPUTile> &gpuTiles);
+        void endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, const std::vector<interop::GPUTile> &gpuTiles, bool rtEnabled);
         void recordSetup(RenderWorker *worker, std::vector<BufferUploader *> bufferUploaders, RSPProcessor *rspProcessor, VertexProcessor *vertexProcessor, const OutputBuffers *outputBuffers, bool rtEnabled);
         void recordFramebuffer(RenderWorker *worker, uint32_t framebufferIndex);
         void waitForUploaders();

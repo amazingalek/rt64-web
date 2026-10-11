@@ -445,14 +445,12 @@ namespace RT64 {
         pixelShader = device->createShader(PSBlob, PSBlobSize, "PSMain", shaderFormat);
 
         FramebufferRendererDescriptorCommonSet descriptorCommonSet(shaderLibrary->samplerLibrary, device->getCapabilities().raytracing);
-        FramebufferRendererDescriptorTextureSet descriptorTextureSet;
         FramebufferRendererDescriptorFramebufferSet descriptorFramebufferSet;
         RenderPipelineLayoutBuilder layoutBuilder;
         layoutBuilder.begin(false, true);
         layoutBuilder.addPushConstant(0, 0, sizeof(interop::RasterParams), RenderShaderStageFlag::VERTEX | RenderShaderStageFlag::PIXEL);
         layoutBuilder.addDescriptorSet(descriptorCommonSet);
-        layoutBuilder.addDescriptorSet(descriptorTextureSet);
-        layoutBuilder.addDescriptorSet(descriptorTextureSet);
+        addFramebufferRendererTextureSets(layoutBuilder, device->getCapabilities());
         layoutBuilder.addDescriptorSet(descriptorFramebufferSet);
         layoutBuilder.end();
         pipelineLayout = layoutBuilder.create(device);
