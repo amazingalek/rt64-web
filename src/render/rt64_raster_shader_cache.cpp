@@ -6,7 +6,12 @@
 
 #include "common/rt64_thread.h"
 
+// WebGPU builds every pipeline in the browser's GPU process, which does nothing else meanwhile, so no frame is drawn
+// or read back. A specialized RasterPS takes 1.4-2 s there each time (Chrome, RTX 2070), and the ubershader 2 s once
+// and a few ms for each further render state, so a WGSL build draws with the ubershader only.
+#if !defined(RT64_WGSL)
 #define ENABLE_OPTIMIZED_SHADER_GENERATION
+#endif
 
 namespace RT64 {
     // RasterShaderCache::CompilationThread
@@ -112,6 +117,7 @@ namespace RT64 {
     }
 
     void RasterShaderCache::submit(const ShaderDescription &desc) {
+#   ifdef ENABLE_OPTIMIZED_SHADER_GENERATION
         {
             std::unique_lock<std::mutex> queueLock(submissionMutex);
 
@@ -132,6 +138,7 @@ namespace RT64 {
         }
 
         descQueueChanged.notify_all();
+#   endif
     }
     
     void RasterShaderCache::waitForAll() {

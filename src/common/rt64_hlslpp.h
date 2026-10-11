@@ -10,4 +10,6 @@
 #define HLSLPP_SCALAR
 #endif
 
+// The scalar fallback (WebAssembly builds) calls labs() without including what declares it.
+#include <cstdlib>
 #include "hlsl++.h"

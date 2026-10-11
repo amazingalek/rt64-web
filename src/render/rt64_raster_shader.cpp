@@ -7,18 +7,39 @@
 #include "xxHash/xxh3.h"
 
 #include "shaders/RenderParams.hlsli.rw.h"
-#include "shaders/RasterPSDynamic.hlsl.spirv.h"
-#include "shaders/RasterPSDynamicMS.hlsl.spirv.h"
-#include "shaders/RasterPSSpecConstant.hlsl.spirv.h"
-#include "shaders/RasterPSSpecConstantMS.hlsl.spirv.h"
-#include "shaders/RasterPSSpecConstantFlat.hlsl.spirv.h"
-#include "shaders/RasterPSSpecConstantFlatMS.hlsl.spirv.h"
-#include "shaders/RasterVSDynamic.hlsl.spirv.h"
-#include "shaders/RasterVSSpecConstant.hlsl.spirv.h"
-#include "shaders/RasterVSSpecConstantFlat.hlsl.spirv.h"
-#include "shaders/PostBlendDitherNoiseAddPS.hlsl.spirv.h"
-#include "shaders/PostBlendDitherNoiseSubPS.hlsl.spirv.h"
-#include "shaders/PostBlendDitherNoiseSubNegativePS.hlsl.spirv.h"
+#if defined(RT64_WGSL)
+#   include "shaders/RasterPSDynamic.hlsl.wgsl.h"
+#   include "shaders/RasterPSDynamicMS.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstant.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantMS.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlat.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlatMS.hlsl.wgsl.h"
+#   include "shaders/RasterVSDynamic.hlsl.wgsl.h"
+#   include "shaders/RasterVSSpecConstant.hlsl.wgsl.h"
+#   include "shaders/RasterVSSpecConstantFlat.hlsl.wgsl.h"
+#   include "shaders/PostBlendDitherNoiseAddPS.hlsl.wgsl.h"
+#   include "shaders/PostBlendDitherNoiseSubPS.hlsl.wgsl.h"
+#   include "shaders/PostBlendDitherNoiseSubNegativePS.hlsl.wgsl.h"
+#   include "shaders/RasterPSDynamicDualSource.hlsl.wgsl.h"
+#   include "shaders/RasterPSDynamicMSDualSource.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantDualSource.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantMSDualSource.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlatDualSource.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlatMSDualSource.hlsl.wgsl.h"
+#else
+#   include "shaders/RasterPSDynamic.hlsl.spirv.h"
+#   include "shaders/RasterPSDynamicMS.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstant.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstantMS.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstantFlat.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstantFlatMS.hlsl.spirv.h"
+#   include "shaders/RasterVSDynamic.hlsl.spirv.h"
+#   include "shaders/RasterVSSpecConstant.hlsl.spirv.h"
+#   include "shaders/RasterVSSpecConstantFlat.hlsl.spirv.h"
+#   include "shaders/PostBlendDitherNoiseAddPS.hlsl.spirv.h"
+#   include "shaders/PostBlendDitherNoiseSubPS.hlsl.spirv.h"
+#   include "shaders/PostBlendDitherNoiseSubNegativePS.hlsl.spirv.h"
+#endif
 #ifdef _WIN32
 #   include "shaders/RasterPSLibrary.hlsl.dxil.h"
 #   include "shaders/RasterPSLibraryMS.hlsl.dxil.h"
@@ -68,6 +89,9 @@ namespace RT64 {
     // OptimizerCacheSPIRV
 
     void OptimizerCacheSPIRV::initialize() {
+#   if defined(RT64_WGSL)
+        assert(false && "A WGSL build has no SPIR-V shaders.");
+#   else
         rasterVS.parse(RasterVSSpecConstantBlobSPIRV, std::size(RasterVSSpecConstantBlobSPIRV));
         rasterVSFlat.parse(RasterVSSpecConstantFlatBlobSPIRV, std::size(RasterVSSpecConstantFlatBlobSPIRV));
         rasterPS.parse(RasterPSSpecConstantBlobSPIRV, std::size(RasterPSSpecConstantBlobSPIRV));
@@ -80,6 +104,7 @@ namespace RT64 {
         assert(!rasterPSMS.empty());
         assert(!rasterPSFlat.empty());
         assert(!rasterPSFlatMS.empty());
+#   endif
     }
 
     // RasterShader
@@ -95,10 +120,51 @@ namespace RT64 {
         const bool useMSAA = (multisampling.sampleCount > 1);
         std::unique_ptr<RenderShader> vertexShader;
         std::unique_ptr<RenderShader> pixelShader;
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(RT64_WGSL)
         std::vector<RenderSpecConstant> specConstants;
 #endif
-        if (shaderFormat == RenderShaderFormat::SPIRV) {
+        if (shaderFormat == RenderShaderFormat::WGSL) {
+#       if defined(RT64_WGSL)
+            // As Metal: the pre-compiled permutation, with the spec constants as the pipeline's override constants. RasterPS
+            // writes the blend factor to a second output only where the device has dual-source blending (createPipeline).
+            const bool dualSource = device->getCapabilities().dualSourceBlending;
+            if (desc.flags.smoothShade) {
+                vertexShader = device->createShader(RasterVSSpecConstantBlobWGSL, sizeof(RasterVSSpecConstantBlobWGSL), "VSMain", shaderFormat);
+                if (useMSAA) {
+                    pixelShader = dualSource ?
+                        device->createShader(RasterPSSpecConstantMSDualSourceBlobWGSL, sizeof(RasterPSSpecConstantMSDualSourceBlobWGSL), "PSMain", shaderFormat) :
+                        device->createShader(RasterPSSpecConstantMSBlobWGSL, sizeof(RasterPSSpecConstantMSBlobWGSL), "PSMain", shaderFormat);
+                }
+                else {
+                    pixelShader = dualSource ?
+                        device->createShader(RasterPSSpecConstantDualSourceBlobWGSL, sizeof(RasterPSSpecConstantDualSourceBlobWGSL), "PSMain", shaderFormat) :
+                        device->createShader(RasterPSSpecConstantBlobWGSL, sizeof(RasterPSSpecConstantBlobWGSL), "PSMain", shaderFormat);
+                }
+            }
+            else {
+                vertexShader = device->createShader(RasterVSSpecConstantFlatBlobWGSL, sizeof(RasterVSSpecConstantFlatBlobWGSL), "VSMain", shaderFormat);
+                if (useMSAA) {
+                    pixelShader = dualSource ?
+                        device->createShader(RasterPSSpecConstantFlatMSDualSourceBlobWGSL, sizeof(RasterPSSpecConstantFlatMSDualSourceBlobWGSL), "PSMain", shaderFormat) :
+                        device->createShader(RasterPSSpecConstantFlatMSBlobWGSL, sizeof(RasterPSSpecConstantFlatMSBlobWGSL), "PSMain", shaderFormat);
+                }
+                else {
+                    pixelShader = dualSource ?
+                        device->createShader(RasterPSSpecConstantFlatDualSourceBlobWGSL, sizeof(RasterPSSpecConstantFlatDualSourceBlobWGSL), "PSMain", shaderFormat) :
+                        device->createShader(RasterPSSpecConstantFlatBlobWGSL, sizeof(RasterPSSpecConstantFlatBlobWGSL), "PSMain", shaderFormat);
+                }
+            }
+
+            specConstants.emplace_back(0, desc.otherMode.L);
+            specConstants.emplace_back(1, desc.otherMode.H);
+            specConstants.emplace_back(2, desc.colorCombiner.L);
+            specConstants.emplace_back(3, desc.colorCombiner.H);
+            specConstants.emplace_back(4, desc.flags.value);
+#       else
+            assert(false && "This build has no WGSL shaders.");
+#       endif
+        }
+        else if (shaderFormat == RenderShaderFormat::SPIRV) {
             // Choose the pre-compiled shader permutations.
             const respv::Shader *VS = nullptr;
             const respv::Shader *PS = nullptr;
@@ -232,7 +298,7 @@ namespace RT64 {
         creation.cvgAdd = (desc.otherMode.cvgDst() == CVG_DST_WRAP) || (desc.otherMode.cvgDst() == CVG_DST_SAVE);
         creation.NoN = desc.flags.NoN;
         creation.usesHDR = desc.flags.usesHDR;
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(RT64_WGSL)
         creation.specConstants = specConstants;
 #endif
         creation.multisampling = multisampling;
@@ -331,10 +397,12 @@ namespace RT64 {
 
         // Alpha blending is performed by using dual source blending. The blending factor will be in the secondary output.
         RenderBlendDesc &targetBlend = pipelineDesc.renderTargetBlend[0];
+        // Without dual-source blending (optional in WebGPU), RasterPS writes the factor to its one output's alpha instead.
         if (c.alphaBlend) {
+            const bool dualSource = c.device->getCapabilities().dualSourceBlending;
             targetBlend.blendEnabled = true;
-            targetBlend.srcBlend = RenderBlend::SRC1_ALPHA;
-            targetBlend.dstBlend = RenderBlend::INV_SRC1_ALPHA;
+            targetBlend.srcBlend = dualSource ? RenderBlend::SRC1_ALPHA : RenderBlend::SRC_ALPHA;
+            targetBlend.dstBlend = dualSource ? RenderBlend::INV_SRC1_ALPHA : RenderBlend::INV_SRC_ALPHA;
             targetBlend.blendOp = RenderBlendOperation::ADD;
         }
 
@@ -422,12 +490,29 @@ namespace RT64 {
             PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSBlobDXIL) : std::size(RasterPSDynamicBlobDXIL));
             break;
 #   endif
+#   if defined(RT64_WGSL)
+        case RenderShaderFormat::WGSL: {
+            const bool dualSource = device->getCapabilities().dualSourceBlending;
+            VSBlob = RasterVSDynamicBlobWGSL;
+            VSBlobSize = uint32_t(sizeof(RasterVSDynamicBlobWGSL));
+            if (useMSAA) {
+                PSBlob = dualSource ? RasterPSDynamicMSDualSourceBlobWGSL : RasterPSDynamicMSBlobWGSL;
+                PSBlobSize = uint32_t(dualSource ? sizeof(RasterPSDynamicMSDualSourceBlobWGSL) : sizeof(RasterPSDynamicMSBlobWGSL));
+            }
+            else {
+                PSBlob = dualSource ? RasterPSDynamicDualSourceBlobWGSL : RasterPSDynamicBlobWGSL;
+                PSBlobSize = uint32_t(dualSource ? sizeof(RasterPSDynamicDualSourceBlobWGSL) : sizeof(RasterPSDynamicBlobWGSL));
+            }
+            break;
+        }
+#   else
         case RenderShaderFormat::SPIRV:
             VSBlob = RasterVSDynamicBlobSPIRV;
             PSBlob = useMSAA ? RasterPSDynamicMSBlobSPIRV : RasterPSDynamicBlobSPIRV;
             VSBlobSize = uint32_t(std::size(RasterVSDynamicBlobSPIRV));
             PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSBlobSPIRV) : std::size(RasterPSDynamicBlobSPIRV));
             break;
+#   endif
 #   ifdef __APPLE__
         case RenderShaderFormat::METAL:
             VSBlob = RasterVSDynamicBlobMSL;
@@ -500,11 +585,19 @@ namespace RT64 {
             postBlendSubNegativePixelShader = device->createShader(PostBlendDitherNoiseSubNegativePSBlobDXIL, std::size(PostBlendDitherNoiseSubNegativePSBlobDXIL), "PSMain", shaderFormat);
             break;
 #   endif
+#   if defined(RT64_WGSL)
+        case RenderShaderFormat::WGSL:
+            postBlendAddPixelShader = device->createShader(PostBlendDitherNoiseAddPSBlobWGSL, sizeof(PostBlendDitherNoiseAddPSBlobWGSL), "PSMain", shaderFormat);
+            postBlendSubPixelShader = device->createShader(PostBlendDitherNoiseSubPSBlobWGSL, sizeof(PostBlendDitherNoiseSubPSBlobWGSL), "PSMain", shaderFormat);
+            postBlendSubNegativePixelShader = device->createShader(PostBlendDitherNoiseSubNegativePSBlobWGSL, sizeof(PostBlendDitherNoiseSubNegativePSBlobWGSL), "PSMain", shaderFormat);
+            break;
+#   else
         case RenderShaderFormat::SPIRV:
             postBlendAddPixelShader = device->createShader(PostBlendDitherNoiseAddPSBlobSPIRV, std::size(PostBlendDitherNoiseAddPSBlobSPIRV), "PSMain", shaderFormat);
             postBlendSubPixelShader = device->createShader(PostBlendDitherNoiseSubPSBlobSPIRV, std::size(PostBlendDitherNoiseSubPSBlobSPIRV), "PSMain", shaderFormat);
             postBlendSubNegativePixelShader = device->createShader(PostBlendDitherNoiseSubNegativePSBlobSPIRV, std::size(PostBlendDitherNoiseSubNegativePSBlobSPIRV), "PSMain", shaderFormat);
             break;
+#   endif
 #   ifdef __APPLE__
         case RenderShaderFormat::METAL:
             postBlendAddPixelShader = device->createShader(PostBlendDitherNoiseAddPSBlobMSL, std::size(PostBlendDitherNoiseAddPSBlobMSL), "PSMain", shaderFormat);

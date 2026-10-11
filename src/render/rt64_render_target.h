@@ -5,6 +5,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <unordered_set>
+#include <vector>
 
 #include "common/rt64_common.h"
 #include "hle/rt64_framebuffer.h"
@@ -74,5 +76,10 @@ namespace RT64 {
         static hlslpp::float2 computeFixedResolutionScale(uint32_t nativeWidth, hlslpp::float2 resolutionScale);
         static RenderFormat colorBufferFormat(bool usesHDR);
         static RenderFormat depthBufferFormat();
+
+        // WebGPU needs every attachment of a render pass to be the same size, where elsewhere a depth target only has to
+        // be as big as its color target. Grows each pair's color target to its depth target, which must already be at
+        // least as big (the depth target a pair has none of is shared, so it may have grown for a later pair).
+        static void matchColorToDepthTargets(RenderWorker *worker, const std::vector<std::pair<RenderTarget *, RenderTarget *>> &colorDepthPairs, std::unordered_set<RenderTarget *> &resizedTargets);
     };
 };

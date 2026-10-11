@@ -585,6 +585,10 @@ namespace RT64 {
                 }
             }
 
+#       if RT64_WGSL
+            RenderTarget::matchColorToDepthTargets(ext.workloadGraphicsWorker, colorDepthPairs, resizedTargets);
+#       endif
+
             for (RenderTarget *renderTarget : resizedTargets) {
                 renderFramebufferManager->destroyAllWithRenderTarget(renderTarget);
             }

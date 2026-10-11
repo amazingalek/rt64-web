@@ -1363,8 +1363,15 @@ namespace RT64 {
         memcpy(paramBufferBytes, &fbParams, sizeof(interop::FramebufferParams));
         framebuffer.paramsBuffer->unmap();
 
+#   if RT64_WGSL
+        // Only the raytracing shaders read the background color, and WebGPU refuses a pass that draws into a texture
+        // a bound set samples, which without MSAA the resolved texture is.
+        RenderTexture *backgroundColorTexture = dummyColorTarget.get();
+        RenderTextureView *backgroundColorTextureView = dummyColorTargetView.get();
+#   else
         RenderTexture *backgroundColorTexture = (p.fbStorage->colorTarget != nullptr) ? p.fbStorage->colorTarget->getResolvedTexture() : dummyColorTarget.get();
         RenderTextureView *backgroundColorTextureView = (p.fbStorage->colorTarget != nullptr) ? p.fbStorage->colorTarget->getResolvedTextureView() : dummyColorTargetView.get();
+#   endif
         framebuffer.descRealFbSet->setBuffer(framebuffer.descRealFbSet->FbParams, framebuffer.paramsBuffer.get(), sizeof(interop::FramebufferParams));
         framebuffer.descRealFbSet->setTexture(framebuffer.descRealFbSet->gBackgroundColor, backgroundColorTexture, RenderTextureLayout::SHADER_READ, backgroundColorTextureView);
         framebuffer.descRealFbSet->setTexture(framebuffer.descRealFbSet->gBackgroundDepth, p.fbStorage->depthTarget->texture.get(), RenderTextureLayout::DEPTH_READ, p.fbStorage->depthTarget->textureView.get());

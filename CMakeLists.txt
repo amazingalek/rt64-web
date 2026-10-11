@@ -510,6 +510,9 @@ endif()
 if (RT64_PACKED_RSP_INPUTS)
     target_compile_definitions(rt64 PUBLIC RT64_PACKED_RSP_INPUTS=1)
 endif()
+if (RT64_WGSL)
+    target_compile_definitions(rt64 PUBLIC RT64_WGSL=1)
+endif()
 
 # Add common libraries.
 target_link_libraries(rt64 re-spirv)

@@ -49,6 +49,9 @@ namespace RT64 {
         VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
         ~VulkanContext() {
+#       if defined(__EMSCRIPTEN__)
+            // A page has only WebGPU, so there is no Vulkan inspector to clean up.
+#       else
             if (renderPass != VK_NULL_HANDLE) {
                 vkDestroyRenderPass(device, renderPass, nullptr);
             }
@@ -56,6 +59,7 @@ namespace RT64 {
             if (descriptorPool != VK_NULL_HANDLE) {
                 vkDestroyDescriptorPool(device, descriptorPool, nullptr);
             }
+#       endif
         }
     };
 
@@ -105,6 +109,10 @@ namespace RT64 {
             break;
         }
         case UserConfiguration::GraphicsAPI::Vulkan: {
+#       if defined(__EMSCRIPTEN__)
+            assert(false && "Unsupported Graphics API.");
+            return;
+#       else
             VulkanDevice *interfaceDevice = static_cast<VulkanDevice *>(device);
             const VulkanSwapChain *interfaceSwapChain = static_cast<const VulkanSwapChain *>(swapChain);
             ImGui_ImplVulkan_LoadFunctions([](const char *functionName, void *vulkanInstance) {
@@ -133,6 +141,7 @@ namespace RT64 {
             initInfo.CheckVkResultFn = &checkVulkanResult;
 
             ImGui_ImplVulkan_Init(&initInfo);
+#       endif
             break;
         }
         default:
@@ -238,8 +247,10 @@ namespace RT64 {
                 break;
             }
             case UserConfiguration::GraphicsAPI::Vulkan: {
+#       if !defined(__EMSCRIPTEN__)
                 VulkanCommandList *interfaceCommandList = static_cast<VulkanCommandList *>(commandList);
                 ImGui_ImplVulkan_RenderDrawData(drawData, interfaceCommandList->vk);
+#       endif
                 break;
             }
             default:

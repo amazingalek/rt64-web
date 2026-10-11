@@ -76,14 +76,31 @@ namespace RT64 {
         }
 
         changes.pixelTexture = renderWorker->device->createTexture(RenderTextureDesc::Texture2D(alignedWidth, alignedHeight, 1, pixelFormat, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
-        changes.booleanTexture = renderWorker->device->createTexture(RenderTextureDesc::Texture2D(alignedWidth, alignedHeight, 1, RenderFormat::R8_UINT, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
+#   if RT64_WGSL
+        // WebGPU has no 8-bit storage textures (the shaders declare it r32ui there).
+        const RenderFormat booleanFormat = RenderFormat::R32_UINT;
+#   else
+        const RenderFormat booleanFormat = RenderFormat::R8_UINT;
+#   endif
+        changes.booleanTexture = renderWorker->device->createTexture(RenderTextureDesc::Texture2D(alignedWidth, alignedHeight, 1, booleanFormat, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
         changes.drawDescSet = std::make_unique<FramebufferDrawChangesDescriptorSet>(renderWorker->device);
         changes.drawDescSet->setTexture(changes.drawDescSet->gColor, changes.pixelTexture.get(), RenderTextureLayout::SHADER_READ);
         changes.drawDescSet->setTexture(changes.drawDescSet->gDepth, changes.pixelTexture.get(), RenderTextureLayout::SHADER_READ);
         changes.drawDescSet->setTexture(changes.drawDescSet->gBoolean, changes.booleanTexture.get(), RenderTextureLayout::SHADER_READ);
         changes.readChangesSet = std::make_unique<FramebufferReadChangesDescriptorChangesSet>(renderWorker->device);
-        changes.readChangesSet->setTexture(changes.readChangesSet->gOutputChangeColor, changes.pixelTexture.get(), RenderTextureLayout::GENERAL);
-        changes.readChangesSet->setTexture(changes.readChangesSet->gOutputChangeDepth, changes.pixelTexture.get(), RenderTextureLayout::GENERAL);
+#   if RT64_WGSL
+        // WebGPU checks a storage texture's format against the shader's for every binding a shader can reach, so the
+        // output of the type this change isn't gets a texture of its own format, which the shader never writes.
+        const RenderFormat otherTypeFormat = (type == FramebufferChange::Type::Color) ? RenderFormat::R32_FLOAT : RenderTarget::colorBufferFormat(usesHDR);
+        changes.otherTypeTexture = renderWorker->device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, otherTypeFormat, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
+        RenderTexture *colorOutput = (type == FramebufferChange::Type::Color) ? changes.pixelTexture.get() : changes.otherTypeTexture.get();
+        RenderTexture *depthOutput = (type == FramebufferChange::Type::Depth) ? changes.pixelTexture.get() : changes.otherTypeTexture.get();
+#   else
+        RenderTexture *colorOutput = changes.pixelTexture.get();
+        RenderTexture *depthOutput = changes.pixelTexture.get();
+#   endif
+        changes.readChangesSet->setTexture(changes.readChangesSet->gOutputChangeColor, colorOutput, RenderTextureLayout::GENERAL);
+        changes.readChangesSet->setTexture(changes.readChangesSet->gOutputChangeDepth, depthOutput, RenderTextureLayout::GENERAL);
         changes.readChangesSet->setTexture(changes.readChangesSet->gOutputChangeBoolean, changes.booleanTexture.get(), RenderTextureLayout::GENERAL);
 
         return changes;

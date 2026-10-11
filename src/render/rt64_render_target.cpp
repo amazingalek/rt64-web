@@ -512,4 +512,14 @@ namespace RT64 {
     RenderFormat RenderTarget::depthBufferFormat() {
         return RenderFormat::D32_FLOAT;
     }
+
+    void RenderTarget::matchColorToDepthTargets(RenderWorker *worker, const std::vector<std::pair<RenderTarget *, RenderTarget *>> &colorDepthPairs, std::unordered_set<RenderTarget *> &resizedTargets) {
+        // A color target that grows loses what was drawn on it, as any target does when it grows. Targets only grow, so
+        // after the first frames this changes nothing.
+        for (auto colorDepthPair : colorDepthPairs) {
+            if (colorDepthPair.first->resize(worker, colorDepthPair.second->width, colorDepthPair.second->height)) {
+                resizedTargets.emplace(colorDepthPair.first);
+            }
+        }
+    }
 };

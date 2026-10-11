@@ -6,6 +6,29 @@
 
 #include <cassert>
 
+#if defined(__EMSCRIPTEN__)
+namespace RT64 {
+    // A page has no file dialogs of its own: every one is cancelled.
+
+    std::atomic<bool> FileDialog::isOpen = false;
+
+    void FileDialog::initialize() { }
+
+    void FileDialog::finish() { }
+
+    std::filesystem::path FileDialog::getDirectoryPath() {
+        return std::filesystem::path();
+    }
+
+    std::filesystem::path FileDialog::getOpenFilename(const std::vector<FileFilter> &) {
+        return std::filesystem::path();
+    }
+
+    std::filesystem::path FileDialog::getSaveFilename(const std::vector<FileFilter> &) {
+        return std::filesystem::path();
+    }
+};
+#else
 #include <nfd.h>
 
 namespace RT64 {
@@ -77,3 +100,4 @@ namespace RT64 {
         return path;
     }
 };
+#endif

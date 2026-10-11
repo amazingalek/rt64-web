@@ -230,6 +230,13 @@ namespace RT64 {
             gLinearClampWrapSampler = builder.addImmutableSampler(13, samplerLibrary.linear.clampWrap.get());
             gLinearClampMirrorSampler = builder.addImmutableSampler(14, samplerLibrary.linear.clampMirror.get());
             gLinearClampClampSampler = builder.addImmutableSampler(15, samplerLibrary.linear.clampClamp.get());
+#       if RT64_WGSL
+            // WebGPU guarantees 16 samplers in a stage, so its shaders load texels instead of sampling them nearest
+            // (TextureSampler.hlsli) and have no nearest samplers.
+            gNearestWrapWrapSampler = gNearestWrapMirrorSampler = gNearestWrapClampSampler = 0;
+            gNearestMirrorWrapSampler = gNearestMirrorMirrorSampler = gNearestMirrorClampSampler = 0;
+            gNearestClampWrapSampler = gNearestClampMirrorSampler = gNearestClampClampSampler = 0;
+#       else
             gNearestWrapWrapSampler = builder.addImmutableSampler(16, samplerLibrary.nearest.wrapWrap.get());
             gNearestWrapMirrorSampler = builder.addImmutableSampler(17, samplerLibrary.nearest.wrapMirror.get());
             gNearestWrapClampSampler = builder.addImmutableSampler(18, samplerLibrary.nearest.wrapClamp.get());
@@ -239,6 +246,7 @@ namespace RT64 {
             gNearestClampWrapSampler = builder.addImmutableSampler(22, samplerLibrary.nearest.clampWrap.get());
             gNearestClampMirrorSampler = builder.addImmutableSampler(23, samplerLibrary.nearest.clampMirror.get());
             gNearestClampClampSampler = builder.addImmutableSampler(24, samplerLibrary.nearest.clampClamp.get());
+#       endif
             RtParams = builder.addConstantBuffer(25);
             SceneBVH = raytracing ? builder.addAccelerationStructure(26) : 0;
             posBuffer = builder.addByteAddressBuffer(27);

@@ -10,3 +10,8 @@ if (APPLE)
         XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS ${CMAKE_CURRENT_SOURCE_DIR}/../../../rt64.entitlements
     )
 endif()
+
+# Built with Emscripten, the tool runs in node at build time and reads and writes the host's files.
+if (EMSCRIPTEN)
+    target_link_options(file_to_c PRIVATE -sNODERAWFS=1)
+endif()

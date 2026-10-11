@@ -1254,6 +1254,10 @@ namespace RT64 {
                             resizedTargets.emplace(colorDepthPair.second);
                         }
                     }
+
+#               if RT64_WGSL
+                    RenderTarget::matchColorToDepthTargets(ext.framebufferGraphicsWorker, colorDepthPairs, resizedTargets);
+#               endif
                 }
 
                 for (RenderTarget *renderTarget : resizedTargets) {

@@ -81,6 +81,10 @@ namespace RT64 {
 
     void ApplicationWindow::setup(const char *windowTitle, Listener *listener) {
         assert(windowTitle != nullptr);
+#   if defined(__EMSCRIPTEN__)
+        // A page has no windows to open: draw on its canvas.
+        setup(RenderWindow("#canvas"), listener, 0);
+#   else
 
         // Find the right window dimension and placement.
         const int Width = 1280;
@@ -168,6 +172,7 @@ namespace RT64 {
         setup(windowHandle, listener, tid);
 #   else
         setup(windowHandle, listener, pthread_self());
+#   endif
 #   endif
     }
 

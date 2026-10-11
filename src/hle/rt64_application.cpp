@@ -16,12 +16,18 @@
 #   include "res/bluenoise/LDR_64_64_64_RGB1.h"
 #endif
 
+#if defined(__EMSCRIPTEN__)
+#   include <emscripten/threading.h>
+#   include "plume_device_thread.h"
+#endif
+
 //#define LOG_DISPLAY_LISTS
 
 namespace plume {
     // External functions to create the backends.
     extern std::unique_ptr<RenderInterface> CreateD3D12Interface();
     extern std::unique_ptr<RenderInterface> CreateMetalInterface();
+    extern std::unique_ptr<RenderInterface> CreateWebGPUInterface();
 #ifdef RT64_SDL_WINDOW_VULKAN
     extern std::unique_ptr<RenderInterface> CreateVulkanInterface(RenderWindow renderWindow);
 #else
@@ -33,7 +39,9 @@ namespace RT64 {
     // Constants
 
     static std::unique_ptr<RenderInterface> CreateVulkanInterfaceWrapper(RenderWindow renderWindow) {
-#ifdef RT64_SDL_WINDOW_VULKAN
+#if defined(__EMSCRIPTEN__)
+        return nullptr;
+#elif defined(RT64_SDL_WINDOW_VULKAN)
         return plume::CreateVulkanInterface(renderWindow);
 #else
         return plume::CreateVulkanInterface();
@@ -137,6 +145,18 @@ namespace RT64 {
         const uint32_t CreationAttempts = (userConfig.graphicsAPI == UserConfiguration::GraphicsAPI::Automatic) ? 2 : 1;
 #   else
         const uint32_t CreationAttempts = 1;
+#   endif
+
+#   if defined(__EMSCRIPTEN__)
+        // A page has one graphics API, WebGPU, whatever the configuration says. Its device belongs to the page's main thread,
+        // so every call RT64's threads make is run there (plume_device_thread.h); this thread needn't be that one.
+        renderInterface = CreateDeviceThreadInterface(CreateEmscriptenDeviceThread(emscripten_main_runtime_thread_id()), []() {
+            return CreateWebGPUInterface();
+        });
+
+        if (renderInterface != nullptr) {
+            device = renderInterface->createDevice();
+        }
 #   endif
 
         for (uint32_t creationAttempt = 0; (creationAttempt < CreationAttempts) && (device == nullptr); creationAttempt++) {
