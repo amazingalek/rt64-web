@@ -198,8 +198,8 @@ namespace RT64 {
         void submitRasterScene(RenderWorker *worker, const Framebuffer &framebuffer, RenderFramebufferStorage *fbStorage, const RasterScene &rasterScene, bool &depthState);
         void addFramebuffer(const DrawParams &p);
         void updateIndexTextures(std::vector<BufferUploader::Upload> &shaderUploads);
-        void updateDrawTextureSets(RenderWorker *worker, const std::vector<interop::GPUTile> &gpuTiles);
-        void endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, const std::vector<interop::GPUTile> &gpuTiles, bool rtEnabled);
+        void updateDrawTextureSets(RenderWorker *worker, const std::vector<interop::GPUTile> &gpuTiles, const std::vector<interop::RDPTile> &rdpTiles);
+        void endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, const std::vector<interop::GPUTile> &gpuTiles, const std::vector<interop::RDPTile> &rdpTiles, bool rtEnabled);
         void recordSetup(RenderWorker *worker, std::vector<BufferUploader *> bufferUploaders, RSPProcessor *rspProcessor, VertexProcessor *vertexProcessor, const OutputBuffers *outputBuffers, bool rtEnabled);
         void recordFramebuffer(RenderWorker *worker, uint32_t framebufferIndex);
         void waitForUploaders();

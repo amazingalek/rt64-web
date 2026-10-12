@@ -44,6 +44,19 @@
     case 6: return TEXTURE_CALL(gTileTexture6); \
     default: return TEXTURE_CALL(gTileTexture7); \
     }
+
+// The same with the slot's sampler (gTileSampler0 to 7), for a linear sample.
+#define TILE_TEXTURE_SAMPLER_SWITCH(gpuTile, TEXTURE_SAMPLER_CALL) \
+    switch ((gpuTile).textureIndex >> TILE_SLOT_SHIFT) { \
+    case 0: return TEXTURE_SAMPLER_CALL(gTileTexture0, gTileSampler0); \
+    case 1: return TEXTURE_SAMPLER_CALL(gTileTexture1, gTileSampler1); \
+    case 2: return TEXTURE_SAMPLER_CALL(gTileTexture2, gTileSampler2); \
+    case 3: return TEXTURE_SAMPLER_CALL(gTileTexture3, gTileSampler3); \
+    case 4: return TEXTURE_SAMPLER_CALL(gTileTexture4, gTileSampler4); \
+    case 5: return TEXTURE_SAMPLER_CALL(gTileTexture5, gTileSampler5); \
+    case 6: return TEXTURE_SAMPLER_CALL(gTileTexture6, gTileSampler6); \
+    default: return TEXTURE_SAMPLER_CALL(gTileTexture7, gTileSampler7); \
+    }
 #else
 #define tileTMEM(gpuTile) gTMEM[NonUniformResourceIndex((gpuTile).textureIndex)]
 #define TILE_TEXTURE_SWITCH(gpuTile, TEXTURE_CALL) return TEXTURE_CALL(gTextures[NonUniformResourceIndex((gpuTile).textureIndex)]);
@@ -151,13 +164,11 @@ float4 clampWrapMirrorSample(const RDPTile rdpTile, const GPUTile gpuTile, float
 
 static const float LowPrecision = 128.0f;
 
-float4 sampleTextureNative(Texture2D texture, uint nativeSampler, int2 texelBaseInt, float2 textureSize) {
-    // Transform to native coordinate. Half pixel offset is required to reach the desired texel.
-    float2 nativeUVCoord = (float2(texelBaseInt) + 0.5f) / textureSize;
-
 #ifdef WEBGPU
-    // WebGPU guarantees only 16 samplers in a stage, and SampleGrad needs the 9 linear ones. A nearest sample at a
-    // texel's centre is that texel, so load it, with the sampler's address mode applied to the texel coordinate.
+// WebGPU guarantees only 16 samplers in a stage, and nearest ones for every address mode would be 9 more. A nearest
+// sample at a texel's centre is that texel, so it is loaded, with the sampler's address mode applied to the texel coordinate first: outside
+// the switch over the draw's texture slots, which then holds only the load, rather than this once per slot.
+int2 nativeSamplerTexel(uint nativeSampler, int2 texelBaseInt, float2 textureSize) {
     const int2 size = int2(textureSize);
     const uint addressModeU = (nativeSampler - 1) / 3;
     const uint addressModeV = (nativeSampler - 1) % 3;
@@ -167,8 +178,13 @@ float4 sampleTextureNative(Texture2D texture, uint nativeSampler, int2 texelBase
     int2 mirrored = select(wrapped < size, wrapped, period - 1 - wrapped);
     texel.x = (addressModeU == 2) ? clamp(texel.x, 0, size.x - 1) : mirrored.x;
     texel.y = (addressModeV == 2) ? clamp(texel.y, 0, size.y - 1) : mirrored.y;
-    return texture.Load(int3(texel, 0));
+    return texel;
+}
 #else
+float4 sampleTextureNative(Texture2D texture, uint nativeSampler, int2 texelBaseInt, float2 textureSize) {
+    // Transform to native coordinate. Half pixel offset is required to reach the desired texel.
+    float2 nativeUVCoord = (float2(texelBaseInt) + 0.5f) / textureSize;
+
     // Choose the native sampler that was determined to be compatible.
     switch (nativeSampler) {
         case NATIVE_SAMPLER_WRAP_WRAP:
@@ -191,9 +207,10 @@ float4 sampleTextureNative(Texture2D texture, uint nativeSampler, int2 texelBase
         default:
             return texture.SampleLevel(gNearestClampClampSampler, nativeUVCoord, 0.0f);
     }
-#endif
 }
+#endif
 
+#ifndef PER_DRAW_TEXTURES
 float4 sampleTextureGrad(Texture2D texture, uint nativeSampler, float2 nativeUVCoord, float2 ddxUVNorm, float2 ddyUVNorm) {
     // Choose the native sampler that was determined to be compatible.
     switch (nativeSampler) {
@@ -218,17 +235,29 @@ float4 sampleTextureGrad(Texture2D texture, uint nativeSampler, float2 nativeUVC
             return texture.SampleGrad(gLinearClampClampSampler, nativeUVCoord, ddxUVNorm, ddyUVNorm);
     }
 }
+#endif
 
 float4 sampleTileTextureNative(const GPUTile gpuTile, uint nativeSampler, int2 texelBaseInt) {
+#ifdef WEBGPU
+    return loadTileTexture(gpuTile, int3(nativeSamplerTexel(nativeSampler, texelBaseInt, gpuTile.textureDimensions.xy), 0));
+#else
 #define TEXTURE_CALL(texture) sampleTextureNative(texture, nativeSampler, texelBaseInt, gpuTile.textureDimensions.xy)
     TILE_TEXTURE_SWITCH(gpuTile, TEXTURE_CALL)
 #undef TEXTURE_CALL
+#endif
 }
 
 float4 sampleTileTextureGrad(const GPUTile gpuTile, uint nativeSampler, float2 nativeUVCoord, float2 ddxUVNorm, float2 ddyUVNorm) {
+#ifdef PER_DRAW_TEXTURES
+    // The renderer bound the slot's sampler for nativeSampler (FramebufferRenderer::updateDrawTextureSets).
+#define TEXTURE_SAMPLER_CALL(texture, sampler) texture.SampleGrad(sampler, nativeUVCoord, ddxUVNorm, ddyUVNorm)
+    TILE_TEXTURE_SAMPLER_SWITCH(gpuTile, TEXTURE_SAMPLER_CALL)
+#undef TEXTURE_SAMPLER_CALL
+#else
 #define TEXTURE_CALL(texture) sampleTextureGrad(texture, nativeSampler, nativeUVCoord, ddxUVNorm, ddyUVNorm)
     TILE_TEXTURE_SWITCH(gpuTile, TEXTURE_CALL)
 #undef TEXTURE_CALL
+#endif
 }
 
 float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool filterBilerp, bool filterAverage, bool linearFiltering, float2 uvCoord, uint tlut, bool canDecodeTMEM, uint mipLevel, bool usesHDR) {

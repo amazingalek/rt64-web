@@ -1871,10 +1871,12 @@ namespace RT64 {
     }
 
     // Without descriptor indexing: gives every draw a set with the textures of its tiles, a slot per tile, shared by
-    // the draws that use the same textures. Sets are kept from one workload to the next and only the slots whose
+    // the draws that use the same textures and samplers. A slot's sampler is the linear one for the address modes
+    // RasterPS samples that tile with: the draw's nativeSampler0 for slot 0 and nativeSampler1 for the others (with LOD
+    // and the same modes on every tile, both are tile 0's), or with dynamic tiles each tile's own. Sets are kept from one workload to the next and only the slots whose
     // texture changed are written, since WebGPU makes a new bind group for a set that changed. A slot with no texture
     // (no tile, a TMEM tile, or a tile past the draw's) gets a blank one, so every set has the same layout.
-    void FramebufferRenderer::updateDrawTextureSets(RenderWorker *worker, const std::vector<interop::GPUTile> &gpuTiles) {
+    void FramebufferRenderer::updateDrawTextureSets(RenderWorker *worker, const std::vector<interop::GPUTile> &gpuTiles, const std::vector<interop::RDPTile> &rdpTiles) {
         if (dummyTileTexture == nullptr) {
             dummyTileTexture = worker->device->createTexture(RenderTextureDesc::Texture2D(1, 1, 1, RenderFormat::R8G8B8A8_UNORM));
             dummyTileTexture->setName("Framebuffer Renderer Tile Dummy");
@@ -1916,6 +1918,14 @@ namespace RT64 {
         };
 
         const DrawTexture dummyTexture = { dummyTileTexture.get(), nullptr, 0 };
+        const SamplerSet &linear = shaderLibrary->samplerLibrary.linear;
+        const RenderSampler *nativeSamplers[] = {
+            linear.clampClamp.get(), // NATIVE_SAMPLER_NONE, which is sampled another way.
+            linear.wrapWrap.get(), linear.wrapMirror.get(), linear.wrapClamp.get(),
+            linear.mirrorWrap.get(), linear.mirrorMirror.get(), linear.mirrorClamp.get(),
+            linear.clampWrap.get(), linear.clampMirror.get(), linear.clampClamp.get()
+        };
+
         const uint32_t TileCount = FramebufferRendererDescriptorDrawTextureSet::TileCount;
         const uint32_t drawCount = uint32_t(std::min(instanceDrawCallVector.size(), renderIndicesVector.size()));
         uint32_t setCount = 0;
@@ -1932,8 +1942,10 @@ namespace RT64 {
             }
 
             std::array<DrawTexture, TileCount> drawTextures;
+            std::array<uint32_t, TileCount> drawSamplers;
             DrawTextureStamps drawStamps;
             const interop::RenderIndices &renderIndices = renderIndicesVector[i];
+            const interop::RenderFlags &flags = instanceDrawCallVector[i].triangles.shaderDesc.flags;
             for (uint32_t t = 0; t < TileCount; t++) {
                 const uint32_t tileIndex = renderIndices.rdpTileIndex + t;
                 drawTextures[t] = dummyTexture;
@@ -1944,7 +1956,14 @@ namespace RT64 {
                     }
                 }
 
-                drawStamps[t] = drawTextures[t].stamp;
+                uint32_t nativeSampler = (t == 0) ? flags.nativeSampler0 : flags.nativeSampler1;
+                if (flags.dynamicTiles) {
+                    const bool tileUsed = (t < renderIndices.rdpTileCount) && (tileIndex < rdpTiles.size());
+                    nativeSampler = tileUsed ? rdpTiles[tileIndex].nativeSampler : NATIVE_SAMPLER_NONE;
+                }
+
+                drawSamplers[t] = (nativeSampler <= NATIVE_SAMPLER_CLAMP_CLAMP) ? nativeSampler : NATIVE_SAMPLER_NONE;
+                drawStamps[t] = (drawTextures[t].stamp << 4) | drawSamplers[t];
             }
 
             auto it = drawTextureSetMap.find(drawStamps);
@@ -1965,6 +1984,7 @@ namespace RT64 {
             for (uint32_t t = 0; t < TileCount; t++) {
                 if (setStamps[t] != drawStamps[t]) {
                     drawTextureSet->setTexture(drawTextureSet->gTileTextures[t], drawTextures[t].texture, RenderTextureLayout::SHADER_READ, drawTextures[t].textureView);
+                    drawTextureSet->setSampler(drawTextureSet->gTileSamplers[t], nativeSamplers[drawSamplers[t]]);
                     setStamps[t] = drawStamps[t];
                 }
             }
@@ -1974,7 +1994,7 @@ namespace RT64 {
         }
     }
 
-    void FramebufferRenderer::endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, const std::vector<interop::GPUTile> &gpuTiles, bool rtEnabled) {
+    void FramebufferRenderer::endFramebuffers(RenderWorker *worker, const DrawBuffers *drawBuffers, const OutputBuffers *outputBuffers, const std::vector<interop::GPUTile> &gpuTiles, const std::vector<interop::RDPTile> &rdpTiles, bool rtEnabled) {
         bool shaderViewRtEnabled = false;
         std::vector<BufferUploader::Upload> shaderUploads = {
             { renderIndicesVector.data(), { 0, renderIndicesVector.size() }, sizeof(interop::RenderIndices), RenderBufferFlag::STORAGE, { }, &renderIndicesBuffer},
@@ -2038,7 +2058,7 @@ namespace RT64 {
         updateShaderViews(worker, drawBuffers, outputBuffers, shaderViewRtEnabled);
 
         if (usePerDrawTextures) {
-            updateDrawTextureSets(worker, gpuTiles);
+            updateDrawTextureSets(worker, gpuTiles, rdpTiles);
         }
     }
 

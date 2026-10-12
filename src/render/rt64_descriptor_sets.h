@@ -221,6 +221,14 @@ namespace RT64 {
             GPUTiles = builder.addStructuredBuffer(4);
             instanceRenderIndices = builder.addStructuredBuffer(5);
             DynamicRenderParams = builder.addStructuredBuffer(6);
+#       if RT64_WGSL || RT64_PER_DRAW_TEXTURES
+            // Shaders built for per-draw textures sample linearly with the samplers bound beside them (gTileSampler0 to 7 in
+            // set 1). Left in, these would be counted against WebGPU's 16 samplers a stage too: plume's WebGPU backend makes a
+            // binding visible to the stages that read that binding number in any set.
+            gLinearWrapWrapSampler = gLinearWrapMirrorSampler = gLinearWrapClampSampler = 0;
+            gLinearMirrorWrapSampler = gLinearMirrorMirrorSampler = gLinearMirrorClampSampler = 0;
+            gLinearClampWrapSampler = gLinearClampMirrorSampler = gLinearClampClampSampler = 0;
+#       else
             gLinearWrapWrapSampler = builder.addImmutableSampler(7, samplerLibrary.linear.wrapWrap.get());
             gLinearWrapMirrorSampler = builder.addImmutableSampler(8, samplerLibrary.linear.wrapMirror.get());
             gLinearWrapClampSampler = builder.addImmutableSampler(9, samplerLibrary.linear.wrapClamp.get());
@@ -230,6 +238,7 @@ namespace RT64 {
             gLinearClampWrapSampler = builder.addImmutableSampler(13, samplerLibrary.linear.clampWrap.get());
             gLinearClampMirrorSampler = builder.addImmutableSampler(14, samplerLibrary.linear.clampMirror.get());
             gLinearClampClampSampler = builder.addImmutableSampler(15, samplerLibrary.linear.clampClamp.get());
+#       endif
 #       if RT64_WGSL
             // WebGPU guarantees 16 samplers in a stage, so its shaders load texels instead of sampling them nearest
             // (TextureSampler.hlsli) and have no nearest samplers.
@@ -320,7 +329,7 @@ namespace RT64 {
     };
 
     // Without descriptor indexing (WebGPU has none), sets 1 and 2 of the framebuffer renderer are a set per draw with
-    // the textures of its tiles, one slot per tile, and one buffer with every texture cache entry's TMEM in it, instead
+    // the textures of its tiles and their linear samplers, one slot per tile, and one buffer with every texture cache entry's TMEM in it, instead
     // of the texture cache bound twice. The RT64_PER_DRAW_TEXTURES build does this on every device, to test it.
     // See TextureSampler.hlsli and FramebufferRenderer::updateDrawTextureSets.
     inline bool perDrawTextures(const RenderDeviceCapabilities &capabilities) {
@@ -335,11 +344,16 @@ namespace RT64 {
         static const uint32_t TileCount = 8;
 
         uint32_t gTileTextures[TileCount];
+        uint32_t gTileSamplers[TileCount];
 
         FramebufferRendererDescriptorDrawTextureSet(RenderDevice *device = nullptr) {
             builder.begin();
             for (uint32_t i = 0; i < TileCount; i++) {
                 gTileTextures[i] = builder.addTexture(i);
+            }
+
+            for (uint32_t i = 0; i < TileCount; i++) {
+                gTileSamplers[i] = builder.addSampler(TileCount + i);
             }
 
             builder.end();
