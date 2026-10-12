@@ -167,15 +167,20 @@ namespace RT64 {
     // constants as overrides, a specialized RasterPS took 6 s cold in Chrome (RTX 2070); specialized beforehand, 1-1.6 s,
     // and one game's 105 took 13-18 s together. Chrome keeps them for no later visit: its pipeline cache is far smaller.
     // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so they all
-    // wait for the first frame's draws, and waitForPrebuild() holds the next frame until they are done. Building them
-    // takes the browser's GPU process a few at once: there is nothing else for it to do meanwhile. Each one done is
-    // reported to the page as Module.rt64ShaderProgress(done, count), for it to show. They are made without MSAA, as
-    // the web draws, with RasterPS both with dual-source blending and without, for a device that lacks it. Where
-    // pipelines are built in line with the device's other work (Firefox) they are built all the same, and only the
-    // shaders the list missed are left to the ubershader (setup()).
+    // wait for the first frame's draws. waitForPrebuild() then holds the next frame until the first part of the list is
+    // done, the shaders the game's first screens use (above the list's "background" line; all of them without one), so
+    // a long list doesn't keep the player waiting: GoldenEye's 340 took ~85 s. Building that part takes the browser's
+    // GPU process a few at once: there is nothing else for it to do meanwhile. Each one of it done is reported to the
+    // page as Module.rt64ShaderProgress(done, count), for it to show. Then one thread builds the rest behind the game,
+    // in the list's order but first any a draw asks for (hurryPrebuild()), which draws with the ubershader until its
+    // shader is built; more at once take cores the game's frames need. They are made without MSAA, as the web draws,
+    // with RasterPS both with dual-source blending and without, for a device that lacks it. Where pipelines are built
+    // in line with the device's other work (Firefox) a build behind the game would stall its frames, so the game waits
+    // for the whole list there, and only the shaders the list missed are left to the ubershader (setup()). A page opened
+    // with ?record-shaders prebuilds none, so that it prints every shader the game asks for, in the order it asks.
     void RasterShaderCache::startPrebuild() {
 #   if defined(RT64_PREBUILT_SHADERS)
-        if (!prebuiltShaders) {
+        if (!prebuiltShaders || recordShaders) {
             return;
         }
 
@@ -199,37 +204,63 @@ namespace RT64 {
                 desc.colorCombiner.H = entry.combinerH;
                 desc.flags.value = entry.flags;
                 shaderHashes[desc.hash()] = true;
+                prebuildIndices[desc.hash()] = i;
             }
         }
 
         prebuildCount = RT64PrebuiltShaderCount;
+        prebuildWaitCount = specializedShaders ? RT64PrebuiltShaderWaitCount : RT64PrebuiltShaderCount;
+        prebuildState.assign(prebuildCount, PrebuildQueued);
+        prebuildBusy = true;
         const uint32_t threads = std::clamp(std::thread::hardware_concurrency() / 2U, 1U, 8U);
         for (uint32_t t = 0; t < threads; t++) {
-            prebuildThreads.emplace_back(&RasterShaderCache::prebuildLoop, this);
+            prebuildThreads.emplace_back(&RasterShaderCache::prebuildLoop, this, t);
         }
 
-        printf("RT64: %u prebuilt shaders, built %u at a time once the game draws\n", prebuildCount, threads);
+        printf("RT64: %u prebuilt shaders, the game waiting for %u, built %u at a time once the game draws\n", prebuildCount, prebuildWaitCount, threads);
 #   endif
     }
 
     void RasterShaderCache::reportPrebuild(uint32_t done) {
 #   if defined(__EMSCRIPTEN__)
-        MAIN_THREAD_ASYNC_EM_ASM({ if (Module['rt64ShaderProgress']) Module['rt64ShaderProgress']($0, $1); }, done, prebuildCount);
+        MAIN_THREAD_ASYNC_EM_ASM({ if (Module['rt64ShaderProgress']) Module['rt64ShaderProgress']($0, $1); }, done, prebuildWaitCount);
 #   endif
     }
 
-    void RasterShaderCache::prebuildLoop() {
+    void RasterShaderCache::prebuildLoop(uint32_t thread) {
 #   if defined(RT64_PREBUILT_SHADERS)
         Thread::setCurrentThreadName("RT64 Prebuild");
         while (true) {
-            uint32_t index;
+            uint32_t index = UINT32_MAX;
             {
                 std::unique_lock<std::mutex> lock(prebuildMutex);
-                if (prebuildNext >= prebuildCount) {
+
+                // Once the game is past the wait, one thread builds the rest.
+                if ((thread > 0) && (prebuildWaitDone >= prebuildWaitCount)) {
                     break;
                 }
 
-                index = prebuildNext++;
+                while (!prebuildUrgent.empty() && (index == UINT32_MAX)) {
+                    if (prebuildState[prebuildUrgent.front()] != PrebuildTaken) {
+                        index = prebuildUrgent.front();
+                    }
+
+                    prebuildUrgent.pop();
+                }
+
+                while ((index == UINT32_MAX) && (prebuildNext < prebuildCount)) {
+                    if (prebuildState[prebuildNext] != PrebuildTaken) {
+                        index = prebuildNext;
+                    }
+
+                    prebuildNext++;
+                }
+
+                if (index == UINT32_MAX) {
+                    break;
+                }
+
+                prebuildState[index] = PrebuildTaken;
             }
 
             const RT64PrebuiltShader &entry = RT64PrebuiltShaderList[index];
@@ -252,18 +283,28 @@ namespace RT64 {
                 GPUShaders[desc.hash()] = std::move(shader);
             }
 
-            uint32_t done;
+            const bool waitedFor = (index < prebuildWaitCount);
+            uint32_t waitDone = 0;
             {
                 std::unique_lock<std::mutex> lock(prebuildMutex);
-                done = ++prebuildDone;
-                if (done == prebuildCount) {
+                if (waitedFor) {
+                    waitDone = ++prebuildWaitDone;
+                    if (waitDone == prebuildWaitCount) {
+                        printf("RT64: the %u prebuilt shaders the game waits for built in %.1f s\n", prebuildWaitCount, prebuildTimer.elapsedSeconds());
+                    }
+                }
+
+                if (++prebuildDone == prebuildCount) {
                     prebuildText = std::string();
+                    prebuildBusy = false;
                     printf("RT64: %u prebuilt shaders built in %.1f s\n", prebuildCount, prebuildTimer.elapsedSeconds());
                 }
             }
 
             prebuildChanged.notify_all();
-            reportPrebuild(done);
+            if (waitedFor) {
+                reportPrebuild(waitDone);
+            }
         }
 #   endif
     }
@@ -275,7 +316,17 @@ namespace RT64 {
         }
 
         std::unique_lock<std::mutex> lock(prebuildMutex);
-        prebuildChanged.wait(lock, [this]() { return prebuildDone >= prebuildCount; });
+        prebuildChanged.wait(lock, [this]() { return prebuildWaitDone >= prebuildWaitCount; });
+    }
+
+    // A draw asked for a prebuilt shader that isn't built yet: it is built next.
+    void RasterShaderCache::hurryPrebuild(uint64_t shaderHash) {
+        std::unique_lock<std::mutex> lock(prebuildMutex);
+        auto indexIt = prebuildIndices.find(shaderHash);
+        if ((indexIt != prebuildIndices.end()) && (prebuildState[indexIt->second] == PrebuildQueued)) {
+            prebuildState[indexIt->second] = PrebuildHurried;
+            prebuildUrgent.push(indexIt->second);
+        }
     }
 
     void RasterShaderCache::submit(const ShaderDescription &desc) {
@@ -350,6 +401,10 @@ namespace RT64 {
             if ((prebuildCount > 0) && !prebuildDrawn.exchange(true)) {
                 prebuildTimer.reset();
                 reportPrebuild(0);
+            }
+
+            if (prebuildBusy) {
+                hurryPrebuild(shaderHash);
             }
 
             return nullptr;

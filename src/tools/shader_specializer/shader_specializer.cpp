@@ -10,8 +10,12 @@
 //       reads naga's <dir>/<description>.vs.wgsl, .ps.wgsl (dual-source blending) and .ps-single.wgsl (without)
 //       for every line of the list, rewrites them as
 //       PlumeWGSL.cmake does the other shaders, and writes them to <out.c> as one zstd frame and a table of where each
-//       description's shaders are in it (rt64_prebuilt_shaders.h). Shaders that come out the same are kept once.
+//       description's shaders are in it (rt64_prebuilt_shaders.h). Shaders that come out the same are kept once. A line
+//       reading "background" splits the list: the game waits for the shaders above it (RT64PrebuiltShaderWaitCount),
+//       and the rest are built behind it. Without one it waits for them all.
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -96,6 +100,7 @@ static int pack(char **argv) {
     std::map<std::string, std::pair<uint32_t, uint32_t>> placed;
     std::stringstream table;
     uint32_t count = 0;
+    uint32_t waitCount = UINT32_MAX;
     std::istringstream lines(list);
     std::string line;
     while (std::getline(lines, line)) {
@@ -104,6 +109,11 @@ static int pack(char **argv) {
         std::string word;
         while (words >> word) {
             description.emplace_back(word);
+        }
+
+        // The game waits for the shaders above a line reading "background", and the rest are built behind it.
+        if ((description.size() == 1) && (description[0] == "background") && (waitCount == UINT32_MAX)) {
+            waitCount = count;
         }
 
         if ((description.size() != 5) || (description[0][0] == '#')) {
@@ -158,6 +168,7 @@ static int pack(char **argv) {
         << text.size() << " bytes of WGSL in " << compressedSize << ".\n\n#include \"" << argv[3] << "\"\n\n";
     out << "const RT64PrebuiltShader RT64PrebuiltShaderList[] = {\n" << table.str() << "    { 0 }\n};\n\n";
     out << "const uint32_t RT64PrebuiltShaderCount = " << count << "U;\n";
+    out << "const uint32_t RT64PrebuiltShaderWaitCount = " << std::min(waitCount, count) << "U;\n";
     out << "const uint32_t RT64PrebuiltShaderTextSize = " << text.size() << "U;\n";
     out << "const uint32_t RT64PrebuiltShaderDataSize = " << compressedSize << "U;\n";
     out << "const unsigned char RT64PrebuiltShaderData[] = {";
@@ -172,7 +183,7 @@ static int pack(char **argv) {
         return 1;
     }
 
-    printf("shader_specializer: %u shaders, %zu different stages, %zu bytes of WGSL in %zu\n", count, placed.size(), text.size(), compressedSize);
+    printf("shader_specializer: %u shaders, the game waiting for %u, %zu different stages, %zu bytes of WGSL in %zu\n", count, placed.size(), text.size(), compressedSize);
     return 0;
 }
 

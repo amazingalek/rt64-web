@@ -15,6 +15,7 @@
 #include <queue>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "common/rt64_elapsed_timer.h"
 #include "rt64_raster_shader.h"
@@ -54,13 +55,21 @@ namespace RT64 {
         bool prebuiltShaders = false;
         bool recordShaders = false;
 
-        // The shaders specialized when the program was built, built before the game gets past its first frame.
+        // The shaders specialized when the program was built: the game waits past its first frame for the first
+        // prebuildWaitCount, and the rest are built behind it, any a draw asks for first (prebuildUrgent).
         std::list<std::thread> prebuildThreads;
         std::mutex prebuildMutex;
         std::condition_variable prebuildChanged;
         uint32_t prebuildCount = 0;
         uint32_t prebuildDone = 0;
         uint32_t prebuildNext = 0;
+        uint32_t prebuildWaitCount = 0;
+        uint32_t prebuildWaitDone = 0;
+        enum : uint8_t { PrebuildQueued, PrebuildHurried, PrebuildTaken };
+        std::vector<uint8_t> prebuildState;
+        std::queue<uint32_t> prebuildUrgent;
+        std::unordered_map<uint64_t, uint32_t> prebuildIndices;
+        std::atomic<bool> prebuildBusy = false;
         std::atomic<bool> prebuildDrawn = false;
         std::string prebuildText;
         ElapsedTimer prebuildTimer;
@@ -71,7 +80,8 @@ namespace RT64 {
         void submit(const ShaderDescription &desc);
         void waitForAll();
         void startPrebuild();
-        void prebuildLoop();
+        void prebuildLoop(uint32_t thread);
+        void hurryPrebuild(uint64_t shaderHash);
         void reportPrebuild(uint32_t done);
         void waitForPrebuild();
         void destroyAll();

@@ -599,8 +599,9 @@ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shader
 # (one per line, five hex words: other mode L and H, color combiner L and H, flags, as its page prints them when opened
 # with ?record-shaders) gets each one specialized here: shader_specializer folds the description into the spec constant
 # SPIR-V with re-spirv, naga turns that into WGSL, and the lot goes into rt64 compressed. RasterShaderCache builds them
-# before the game gets past its first frame (startPrebuild()), in every browser. They are made without MSAA, with
-# RasterPS both with dual-source blending (.ps.wgsl) and without (.ps-single.wgsl).
+# in every browser (startPrebuild()): those above a line reading "background" in the list (all of them without one)
+# before the game gets past its first frame, and the rest behind it. They are made without MSAA, with RasterPS both
+# with dual-source blending (.ps.wgsl) and without (.ps-single.wgsl).
 if (RT64_WGSL AND RT64_PREBUILT_SHADER_LIST)
     add_subdirectory(src/tools/shader_specializer)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${RT64_PREBUILT_SHADER_LIST})
