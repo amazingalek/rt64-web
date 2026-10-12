@@ -4,15 +4,19 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <list>
+#include <string>
 #include <mutex>
 #include <queue>
 #include <thread>
 #include <unordered_map>
 
+#include "common/rt64_elapsed_timer.h"
 #include "rt64_raster_shader.h"
 
 namespace RT64 {
@@ -47,12 +51,28 @@ namespace RT64 {
         RenderMultisampling multisampling;
         bool usesHDR = false;
         bool specializedShaders = true;
-        
+        bool recordShaders = false;
+
+        // The shaders specialized when the program was built, built before the game gets past its first frame.
+        std::list<std::thread> prebuildThreads;
+        std::mutex prebuildMutex;
+        std::condition_variable prebuildChanged;
+        uint32_t prebuildCount = 0;
+        uint32_t prebuildDone = 0;
+        uint32_t prebuildNext = 0;
+        std::atomic<bool> prebuildDrawn = false;
+        std::string prebuildText;
+        ElapsedTimer prebuildTimer;
+
         RasterShaderCache(uint32_t threadCount, uint32_t ubershaderThreadCount);
         ~RasterShaderCache();
         void setup(RenderDevice *device, RenderShaderFormat shaderFormat, const ShaderLibrary *shaderLibrary, const RenderMultisampling &multisampling);
         void submit(const ShaderDescription &desc);
         void waitForAll();
+        void startPrebuild();
+        void prebuildLoop();
+        void reportPrebuild(uint32_t done);
+        void waitForPrebuild();
         void destroyAll();
         RasterShader *getGPUShader(const ShaderDescription &desc);
         RasterShaderUber *getGPUShaderUber() const;

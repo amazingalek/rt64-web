@@ -81,7 +81,13 @@ namespace RT64 {
         RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, 
             const ShaderCompiler *shaderCompiler, const OptimizerCacheSPIRV *optimizerCacheSPIRV, ShaderCacheWGSL *shaderCacheWGSL);
 
+        // A shader specialized when the program was built (RT64_PREBUILT_SHADER_LIST in CMakeLists.txt): WGSL with the
+        // description's spec constants folded in, so the browser builds it from far less code.
+        RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, const RenderMultisampling &multisampling,
+            const char *vertexWGSL, size_t vertexWGSLSize, const char *pixelWGSL, size_t pixelWGSLSize);
+
         ~RasterShader();
+        void createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling);
         static RasterShaderText generateShaderText(const ShaderDescription &desc, bool multisampling);
         static std::unique_ptr<RenderPipeline> createPipeline(const PipelineCreation &c);
         static RenderMultisampling generateMultisamplingPattern(uint32_t sampleCount, bool sampleLocationsSupported);

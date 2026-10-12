@@ -306,13 +306,33 @@ namespace RT64 {
 #       endif
         }
         
+#if !defined(__APPLE__) && !defined(RT64_WGSL)
+        const std::vector<RenderSpecConstant> specConstants;
+#endif
+        createPipelineFor(pipelineLayout, (vertexShader != nullptr) ? vertexShader.get() : sharedVertexShader, (pixelShader != nullptr) ? pixelShader.get() : sharedPixelShader, specConstants, multisampling);
+    }
+
+    RasterShader::RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, const RenderMultisampling &multisampling,
+        const char *vertexWGSL, size_t vertexWGSLSize, const char *pixelWGSL, size_t pixelWGSLSize)
+    {
+        assert(device != nullptr);
+
+        this->device = device;
+        this->desc = desc;
+
+        std::unique_ptr<RenderShader> vertexShader = device->createShader(vertexWGSL, vertexWGSLSize, "VSMain", RenderShaderFormat::WGSL);
+        std::unique_ptr<RenderShader> pixelShader = device->createShader(pixelWGSL, pixelWGSLSize, "PSMain", RenderShaderFormat::WGSL);
+        createPipelineFor(pipelineLayout, vertexShader.get(), pixelShader.get(), {}, multisampling);
+    }
+
+    void RasterShader::createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling) {
         // Create root signature and PSO.
         const bool copyMode = (desc.otherMode.cycleType() == G_CYC_COPY);
         PipelineCreation creation;
         creation.device = device;
         creation.pipelineLayout = pipelineLayout;
-        creation.vertexShader = (vertexShader != nullptr) ? vertexShader.get() : sharedVertexShader;
-        creation.pixelShader = (pixelShader != nullptr) ? pixelShader.get() : sharedPixelShader;
+        creation.vertexShader = vertexShader;
+        creation.pixelShader = pixelShader;
         creation.buildInBackground = true;
         creation.alphaBlend = !copyMode && interop::Blender::usesAlphaBlend(desc.otherMode);
         creation.culling = !copyMode && desc.flags.culling;
@@ -321,9 +341,7 @@ namespace RT64 {
         creation.cvgAdd = (desc.otherMode.cvgDst() == CVG_DST_WRAP) || (desc.otherMode.cvgDst() == CVG_DST_SAVE);
         creation.NoN = desc.flags.NoN;
         creation.usesHDR = desc.flags.usesHDR;
-#if defined(__APPLE__) || defined(RT64_WGSL)
         creation.specConstants = specConstants;
-#endif
         creation.multisampling = multisampling;
         pipeline = createPipeline(creation);
     }

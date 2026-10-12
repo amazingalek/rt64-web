@@ -594,6 +594,48 @@ endif()
 build_vertex_shader( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSDynamic.hlsl" "-D DYNAMIC_RENDER_PARAMS")
 build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstant.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS")
 build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")
+
+# Prebuilt shaders for WebGPU. A game that sets RT64_PREBUILT_SHADER_LIST to a list of the shader descriptions it uses
+# (one per line, five hex words: other mode L and H, color combiner L and H, flags, as its page prints them when opened
+# with ?record-shaders) gets each one specialized here: shader_specializer folds the description into the spec constant
+# SPIR-V with re-spirv, naga turns that into WGSL, and the lot goes into rt64 compressed. RasterShaderCache builds them
+# before the game gets past its first frame (startPrebuild()). Only RasterPS's dual-source variant without MSAA is made.
+if (RT64_WGSL AND RT64_PREBUILT_SHADER_LIST)
+    add_subdirectory(src/tools/shader_specializer)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${RT64_PREBUILT_SHADER_LIST})
+    file(STRINGS ${RT64_PREBUILT_SHADER_LIST} PREBUILT_LINES REGEX "^[0-9a-fA-F]+( +[0-9a-fA-F]+)( +[0-9a-fA-F]+)( +[0-9a-fA-F]+)( +[0-9a-fA-F]+)")
+    set(PREBUILT_DIR "${CMAKE_BINARY_DIR}/rt64_prebuilt_shaders")
+    set(PREBUILT_SPIRV "${CMAKE_BINARY_DIR}/src/shaders")
+    file(MAKE_DIRECTORY ${PREBUILT_DIR})
+    set(PREBUILT_OUTPUTS)
+    foreach(PREBUILT_LINE ${PREBUILT_LINES})
+        string(REGEX MATCHALL "[0-9a-fA-F]+" PREBUILT_WORDS "${PREBUILT_LINE}")
+        list(GET PREBUILT_WORDS 4 PREBUILT_FLAGS)
+        string(JOIN "_" PREBUILT_KEY ${PREBUILT_WORDS})
+        # The flags' fourth bit is smoothShade.
+        math(EXPR PREBUILT_SMOOTH "(0x${PREBUILT_FLAGS} >> 3) & 1")
+        if (PREBUILT_SMOOTH)
+            set(PREBUILT_VS "${PREBUILT_SPIRV}/RasterVSSpecConstant.hlsl.wgsl.spv")
+            set(PREBUILT_PS "${PREBUILT_SPIRV}/RasterPSSpecConstantDualSource.hlsl.wgsl.spv")
+        else()
+            set(PREBUILT_VS "${PREBUILT_SPIRV}/RasterVSSpecConstantFlat.hlsl.wgsl.spv")
+            set(PREBUILT_PS "${PREBUILT_SPIRV}/RasterPSSpecConstantFlatDualSource.hlsl.wgsl.spv")
+        endif()
+        set(PREBUILT_OUT "${PREBUILT_DIR}/${PREBUILT_KEY}")
+        add_custom_command(OUTPUT ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl
+            COMMAND shader_specializer specialize ${PREBUILT_VS} ${PREBUILT_OUT}.vs.spv ${PREBUILT_WORDS}
+            COMMAND shader_specializer specialize ${PREBUILT_PS} ${PREBUILT_OUT}.ps.spv ${PREBUILT_WORDS}
+            COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.vs.spv ${PREBUILT_OUT}.vs.wgsl
+            COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.ps.spv ${PREBUILT_OUT}.ps.wgsl
+            DEPENDS shader_specializer ${PREBUILT_VS} ${PREBUILT_PS})
+        list(APPEND PREBUILT_OUTPUTS ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl)
+    endforeach()
+    add_custom_command(OUTPUT ${PREBUILT_DIR}/rt64_prebuilt_shaders.c
+        COMMAND shader_specializer pack ${RT64_PREBUILT_SHADER_LIST} ${PREBUILT_DIR} ${PREBUILT_DIR}/rt64_prebuilt_shaders.c "${PROJECT_SOURCE_DIR}/src/render/rt64_prebuilt_shaders.h"
+        DEPENDS shader_specializer ${RT64_PREBUILT_SHADER_LIST} ${PREBUILT_OUTPUTS})
+    target_sources(rt64 PRIVATE ${PREBUILT_DIR}/rt64_prebuilt_shaders.c)
+    target_compile_definitions(rt64 PRIVATE RT64_PREBUILT_SHADERS)
+endif()
 build_compute_shader(rt64 "src/shaders/FbChangesClearCS.hlsl")
 build_pixel_shader(  rt64 "src/shaders/FbChangesDrawColorPS.hlsl")
 build_pixel_shader(  rt64 "src/shaders/FbChangesDrawDepthPS.hlsl")

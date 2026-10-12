@@ -6,6 +6,17 @@
 
 #include "common/rt64_thread.h"
 
+#if defined(__EMSCRIPTEN__)
+#   include <emscripten/emscripten.h>
+#endif
+
+#if defined(RT64_PREBUILT_SHADERS)
+#   include <cstring>
+#   include <zstd.h>
+#   include "common/rt64_elapsed_timer.h"
+#   include "rt64_prebuilt_shaders.h"
+#endif
+
 // On WebGPU a specialized RasterPS takes 1.4-2 s to build in the browser's GPU process (Chrome, RTX 2070). plume's
 // WebGPU backend builds it with createRenderPipelineAsync and the compilation thread waits for it, so the ubershader
 // draws meanwhile, as everywhere else.
@@ -96,6 +107,9 @@ namespace RT64 {
 
     RasterShaderCache::~RasterShaderCache() {
         compilationThreads.clear();
+        for (std::thread &thread : prebuildThreads) {
+            thread.join();
+        }
     }
 
     void RasterShaderCache::setup(RenderDevice *device, RenderShaderFormat shaderFormat, const ShaderLibrary *shaderLibrary, const RenderMultisampling &multisampling) {
@@ -113,6 +127,12 @@ namespace RT64 {
         // Everything draws with the ubershader there.
         specializedShaders = device->getCapabilities().backgroundPipelineBuilds;
 
+#   if defined(__EMSCRIPTEN__)
+        // A page opened with ?record-shaders prints every shader the game asks for, for a list of prebuilt shaders
+        // (RT64_PREBUILT_SHADER_LIST in CMakeLists.txt says how it is used).
+        recordShaders = MAIN_THREAD_EM_ASM_INT({ return new URLSearchParams(location.search).has('record-shaders') ? 1 : 0; }) != 0;
+#   endif
+
         // Initialize the re-spirv optimizer cache.
         if (shaderFormat == RenderShaderFormat::SPIRV) {
             optimizerCacheSPIRV.initialize();
@@ -129,10 +149,126 @@ namespace RT64 {
                 shaderCacheWGSL.get(device, smoothShade, multisampling.sampleCount > 1, vertexShader, pixelShader);
             }
         }
+
+        startPrebuild();
+    }
+
+    // The prebuilt shaders are the ones a game recorded (?record-shaders), specialized when the program was built and
+    // built here before the game gets past its first frame, so a weak GPU never draws a frame with the ubershader, which
+    // costs several times what they do per pixel (on a laptop's Intel graphics it was the difference between a frame
+    // a second and 60), and no shader is built in the middle of a race. Built from the ubershader's WGSL with the spec
+    // constants as overrides, a specialized RasterPS took 6 s cold in Chrome (RTX 2070); specialized beforehand, 1-1.6 s,
+    // and one game's 105 took 13-18 s together. Chrome keeps them for no later visit: its pipeline cache is far smaller.
+    // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so they all
+    // wait for the first frame's draws, and waitForPrebuild() holds the next frame until they are done. Building them
+    // takes the browser's GPU process a few at once: there is nothing else for it to do meanwhile. Each one done is
+    // reported to the page as Module.rt64ShaderProgress(done, count), for it to show. They are made for RasterPS's
+    // dual-source variant without MSAA, what the web gets wherever the device has dual-source blending.
+    void RasterShaderCache::startPrebuild() {
+#   if defined(RT64_PREBUILT_SHADERS)
+        // Where nothing draws with specialized shaders (Firefox: setup()), nothing is prebuilt either.
+        if (!specializedShaders || (shaderFormat != RenderShaderFormat::WGSL) || (multisampling.sampleCount > 1) || !device->getCapabilities().dualSourceBlending) {
+            return;
+        }
+
+        prebuildText.resize(RT64PrebuiltShaderTextSize);
+        const size_t textSize = ZSTD_decompress(prebuildText.data(), prebuildText.size(), RT64PrebuiltShaderData, RT64PrebuiltShaderDataSize);
+        if (textSize != RT64PrebuiltShaderTextSize) {
+            fprintf(stderr, "RT64: the prebuilt shaders didn't decompress: %s\n", ZSTD_isError(textSize) ? ZSTD_getErrorName(textSize) : "wrong size");
+            return;
+        }
+
+        // What is prebuilt is never queued for the compilation threads.
+        {
+            std::unique_lock<std::mutex> queueLock(submissionMutex);
+            for (uint32_t i = 0; i < RT64PrebuiltShaderCount; i++) {
+                const RT64PrebuiltShader &entry = RT64PrebuiltShaderList[i];
+                ShaderDescription desc;
+                memset(&desc, 0, sizeof(desc));
+                desc.otherMode.L = entry.otherModeL;
+                desc.otherMode.H = entry.otherModeH;
+                desc.colorCombiner.L = entry.combinerL;
+                desc.colorCombiner.H = entry.combinerH;
+                desc.flags.value = entry.flags;
+                shaderHashes[desc.hash()] = true;
+            }
+        }
+
+        prebuildCount = RT64PrebuiltShaderCount;
+        const uint32_t threads = std::clamp(std::thread::hardware_concurrency() / 2U, 1U, 8U);
+        for (uint32_t t = 0; t < threads; t++) {
+            prebuildThreads.emplace_back(&RasterShaderCache::prebuildLoop, this);
+        }
+
+        printf("RT64: %u prebuilt shaders, built %u at a time once the game draws\n", prebuildCount, threads);
+#   endif
+    }
+
+    void RasterShaderCache::reportPrebuild(uint32_t done) {
+#   if defined(__EMSCRIPTEN__)
+        MAIN_THREAD_ASYNC_EM_ASM({ if (Module['rt64ShaderProgress']) Module['rt64ShaderProgress']($0, $1); }, done, prebuildCount);
+#   endif
+    }
+
+    void RasterShaderCache::prebuildLoop() {
+#   if defined(RT64_PREBUILT_SHADERS)
+        Thread::setCurrentThreadName("RT64 Prebuild");
+        while (true) {
+            uint32_t index;
+            {
+                std::unique_lock<std::mutex> lock(prebuildMutex);
+                if (prebuildNext >= prebuildCount) {
+                    break;
+                }
+
+                index = prebuildNext++;
+            }
+
+            const RT64PrebuiltShader &entry = RT64PrebuiltShaderList[index];
+            ShaderDescription desc;
+            memset(&desc, 0, sizeof(desc));
+            desc.otherMode.L = entry.otherModeL;
+            desc.otherMode.H = entry.otherModeH;
+            desc.colorCombiner.L = entry.combinerL;
+            desc.colorCombiner.H = entry.combinerH;
+            desc.flags.value = entry.flags;
+            const char *text = prebuildText.data();
+            std::unique_ptr<RasterShader> shader = std::make_unique<RasterShader>(device, desc, shaderUber->pipelineLayout.get(), multisampling,
+                text + entry.vertexOffset, entry.vertexSize, text + entry.pixelOffset, entry.pixelSize);
+
+            {
+                const std::unique_lock<std::mutex> lock(GPUShadersMutex);
+                GPUShaders[desc.hash()] = std::move(shader);
+            }
+
+            uint32_t done;
+            {
+                std::unique_lock<std::mutex> lock(prebuildMutex);
+                done = ++prebuildDone;
+                if (done == prebuildCount) {
+                    prebuildText = std::string();
+                    printf("RT64: %u prebuilt shaders built in %.1f s\n", prebuildCount, prebuildTimer.elapsedSeconds());
+                }
+            }
+
+            prebuildChanged.notify_all();
+            reportPrebuild(done);
+        }
+#   endif
+    }
+
+    void RasterShaderCache::waitForPrebuild() {
+        // Until something has drawn, no WebGPU layout has been resolved for the prebuilt shaders to be built for.
+        if (!prebuildDrawn) {
+            return;
+        }
+
+        std::unique_lock<std::mutex> lock(prebuildMutex);
+        prebuildChanged.wait(lock, [this]() { return prebuildDone >= prebuildCount; });
     }
 
     void RasterShaderCache::submit(const ShaderDescription &desc) {
-        if (!specializedShaders) {
+        if (!specializedShaders && !recordShaders) {
             return;
         }
 
@@ -147,6 +283,15 @@ namespace RT64 {
             }
 
             found = true;
+        }
+
+        // The spec constants' order: other mode L and H, color combiner L and H, flags.
+        if (recordShaders) {
+            printf("rt64 shader: %08x %08x %08x %08x %08x\n", desc.otherMode.L, desc.otherMode.H, desc.colorCombiner.L, desc.colorCombiner.H, desc.flags.value);
+        }
+
+        if (!specializedShaders) {
+            return;
         }
 
         // Push a new shader compilation to the queue.
@@ -189,6 +334,13 @@ namespace RT64 {
         const std::unique_lock<std::mutex> lock(GPUShadersMutex);
         auto shaderIt = GPUShaders.find(shaderHash);
         if (shaderIt == GPUShaders.end()) {
+            // The first draw starts the prebuilt shaders' builds (startPrebuild()), and the page shows their progress
+            // from there: nothing the launcher draws uses them.
+            if ((prebuildCount > 0) && !prebuildDrawn.exchange(true)) {
+                prebuildTimer.reset();
+                reportPrebuild(0);
+            }
+
             return nullptr;
         }
 
