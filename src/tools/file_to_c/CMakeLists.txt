@@ -11,7 +11,9 @@ if (APPLE)
     )
 endif()
 
-# Built with Emscripten, the tool runs in node at build time and reads and writes the host's files.
+# Built with Emscripten, the tool runs in node at build time and reads and writes the host's files. It is linked at -O1,
+# whatever the build's level: every shader waits for it, and Binaryen's whole-module optimizations at -O3 took 10-50 s
+# of a fresh build, for a tool that runs a few dozen times.
 if (EMSCRIPTEN)
-    target_link_options(file_to_c PRIVATE -sNODERAWFS=1)
+    target_link_options(file_to_c PRIVATE -sNODERAWFS=1 -O1)
 endif()
