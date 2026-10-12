@@ -46,6 +46,7 @@ namespace RT64 {
         std::unique_ptr<ShaderCompiler> shaderCompiler;
         RenderMultisampling multisampling;
         bool usesHDR = false;
+        bool specializedShaders = true;
         
         RasterShaderCache(uint32_t threadCount, uint32_t ubershaderThreadCount);
         ~RasterShaderCache();

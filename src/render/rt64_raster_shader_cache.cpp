@@ -108,6 +108,11 @@ namespace RT64 {
         shaderUber = std::make_unique<RasterShaderUber>(device, shaderFormat, multisampling, shaderLibrary, ubershaderThreadCount);
         usesHDR = shaderLibrary->usesHDR;
 
+        // Where building a pipeline holds up the device (WebGPU in Firefox), a specialized shader stalls the frames
+        // for longer than the ubershader it replaces costs them, and a race asks for a new one every few seconds.
+        // Everything draws with the ubershader there.
+        specializedShaders = device->getCapabilities().backgroundPipelineBuilds;
+
         // Initialize the re-spirv optimizer cache.
         if (shaderFormat == RenderShaderFormat::SPIRV) {
             optimizerCacheSPIRV.initialize();
@@ -126,6 +131,10 @@ namespace RT64 {
     }
 
     void RasterShaderCache::submit(const ShaderDescription &desc) {
+        if (!specializedShaders) {
+            return;
+        }
+
         {
             std::unique_lock<std::mutex> queueLock(submissionMutex);
 
