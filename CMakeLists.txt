@@ -599,7 +599,8 @@ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shader
 # (one per line, five hex words: other mode L and H, color combiner L and H, flags, as its page prints them when opened
 # with ?record-shaders) gets each one specialized here: shader_specializer folds the description into the spec constant
 # SPIR-V with re-spirv, naga turns that into WGSL, and the lot goes into rt64 compressed. RasterShaderCache builds them
-# before the game gets past its first frame (startPrebuild()). Only RasterPS's dual-source variant without MSAA is made.
+# before the game gets past its first frame (startPrebuild()), in every browser. They are made without MSAA, with
+# RasterPS both with dual-source blending (.ps.wgsl) and without (.ps-single.wgsl).
 if (RT64_WGSL AND RT64_PREBUILT_SHADER_LIST)
     add_subdirectory(src/tools/shader_specializer)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${RT64_PREBUILT_SHADER_LIST})
@@ -617,18 +618,22 @@ if (RT64_WGSL AND RT64_PREBUILT_SHADER_LIST)
         if (PREBUILT_SMOOTH)
             set(PREBUILT_VS "${PREBUILT_SPIRV}/RasterVSSpecConstant.hlsl.wgsl.spv")
             set(PREBUILT_PS "${PREBUILT_SPIRV}/RasterPSSpecConstantDualSource.hlsl.wgsl.spv")
+            set(PREBUILT_PS_SINGLE "${PREBUILT_SPIRV}/RasterPSSpecConstant.hlsl.wgsl.spv")
         else()
             set(PREBUILT_VS "${PREBUILT_SPIRV}/RasterVSSpecConstantFlat.hlsl.wgsl.spv")
             set(PREBUILT_PS "${PREBUILT_SPIRV}/RasterPSSpecConstantFlatDualSource.hlsl.wgsl.spv")
+            set(PREBUILT_PS_SINGLE "${PREBUILT_SPIRV}/RasterPSSpecConstantFlat.hlsl.wgsl.spv")
         endif()
         set(PREBUILT_OUT "${PREBUILT_DIR}/${PREBUILT_KEY}")
-        add_custom_command(OUTPUT ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl
+        add_custom_command(OUTPUT ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl ${PREBUILT_OUT}.ps-single.wgsl
             COMMAND shader_specializer specialize ${PREBUILT_VS} ${PREBUILT_OUT}.vs.spv ${PREBUILT_WORDS}
             COMMAND shader_specializer specialize ${PREBUILT_PS} ${PREBUILT_OUT}.ps.spv ${PREBUILT_WORDS}
+            COMMAND shader_specializer specialize ${PREBUILT_PS_SINGLE} ${PREBUILT_OUT}.ps-single.spv ${PREBUILT_WORDS}
             COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.vs.spv ${PREBUILT_OUT}.vs.wgsl
             COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.ps.spv ${PREBUILT_OUT}.ps.wgsl
-            DEPENDS shader_specializer ${PREBUILT_VS} ${PREBUILT_PS})
-        list(APPEND PREBUILT_OUTPUTS ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl)
+            COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.ps-single.spv ${PREBUILT_OUT}.ps-single.wgsl
+            DEPENDS shader_specializer ${PREBUILT_VS} ${PREBUILT_PS} ${PREBUILT_PS_SINGLE})
+        list(APPEND PREBUILT_OUTPUTS ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl ${PREBUILT_OUT}.ps-single.wgsl)
     endforeach()
     add_custom_command(OUTPUT ${PREBUILT_DIR}/rt64_prebuilt_shaders.c
         COMMAND shader_specializer pack ${RT64_PREBUILT_SHADER_LIST} ${PREBUILT_DIR} ${PREBUILT_DIR}/rt64_prebuilt_shaders.c "${PROJECT_SOURCE_DIR}/src/render/rt64_prebuilt_shaders.h"

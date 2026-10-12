@@ -8,7 +8,8 @@
 
 // The shaders a game prebuilds on WebGPU (RT64_PREBUILT_SHADER_LIST in CMakeLists.txt, RasterShaderCache::startPrebuild()):
 // a shader description each, and where its vertex and pixel shaders' WGSL is in the text that RT64PrebuiltShaderData
-// decompresses to (zstd), zero-terminated, the sizes counting the zero. shader_specializer writes them.
+// decompresses to (zstd), zero-terminated, the sizes counting the zero: the pixel shader with dual-source blending, and
+// the one for a device without it. shader_specializer writes them.
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +25,8 @@ typedef struct {
     uint32_t vertexSize;
     uint32_t pixelOffset;
     uint32_t pixelSize;
+    uint32_t pixelSingleOffset;
+    uint32_t pixelSingleSize;
 } RT64PrebuiltShader;
 
 extern const RT64PrebuiltShader RT64PrebuiltShaderList[];

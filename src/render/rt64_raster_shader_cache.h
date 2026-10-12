@@ -51,6 +51,7 @@ namespace RT64 {
         RenderMultisampling multisampling;
         bool usesHDR = false;
         bool specializedShaders = true;
+        bool prebuiltShaders = false;
         bool recordShaders = false;
 
         // The shaders specialized when the program was built, built before the game gets past its first frame.

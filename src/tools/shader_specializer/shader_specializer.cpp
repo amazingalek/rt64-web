@@ -7,7 +7,8 @@
 //   shader_specializer specialize <in.spv> <out.spv> <otherModeL> <otherModeH> <combinerL> <combinerH> <flags>
 //       folds a shader description into a spec constant shader's SPIR-V with re-spirv, as RT64 does on Vulkan.
 //   shader_specializer pack <list> <dir> <out.c> <header>
-//       reads naga's <dir>/<description>.vs.wgsl and .ps.wgsl for every line of the list, rewrites them as
+//       reads naga's <dir>/<description>.vs.wgsl, .ps.wgsl (dual-source blending) and .ps-single.wgsl (without)
+//       for every line of the list, rewrites them as
 //       PlumeWGSL.cmake does the other shaders, and writes them to <out.c> as one zstd frame and a table of where each
 //       description's shaders are in it (rt64_prebuilt_shaders.h). Shaders that come out the same are kept once.
 
@@ -114,9 +115,9 @@ static int pack(char **argv) {
             key += "_" + description[i];
         }
 
-        std::pair<uint32_t, uint32_t> where[2];
-        const char *stages[2] = { ".vs.wgsl", ".ps.wgsl" };
-        for (uint32_t s = 0; s < 2; s++) {
+        std::pair<uint32_t, uint32_t> where[3];
+        const char *stages[3] = { ".vs.wgsl", ".ps.wgsl", ".ps-single.wgsl" };
+        for (uint32_t s = 0; s < 3; s++) {
             std::string wgsl;
             if (!readFile(dir + "/" + key + stages[s], wgsl)) {
                 return 1;
@@ -134,7 +135,8 @@ static int pack(char **argv) {
         }
 
         table << "    { 0x" << description[0] << "U, 0x" << description[1] << "U, 0x" << description[2] << "U, 0x" << description[3] << "U, 0x" << description[4] << "U, "
-            << where[0].first << "U, " << where[0].second << "U, " << where[1].first << "U, " << where[1].second << "U },\n";
+            << where[0].first << "U, " << where[0].second << "U, " << where[1].first << "U, " << where[1].second << "U, "
+            << where[2].first << "U, " << where[2].second << "U },\n";
         count++;
     }
 

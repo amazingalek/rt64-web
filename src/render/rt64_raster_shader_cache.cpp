@@ -124,8 +124,15 @@ namespace RT64 {
 
         // Where building a pipeline holds up the device (WebGPU in Firefox), a specialized shader stalls the frames
         // for longer than the ubershader it replaces costs them, and a race asks for a new one every few seconds.
-        // Everything draws with the ubershader there.
+        // What isn't prebuilt draws with the ubershader there.
         specializedShaders = device->getCapabilities().backgroundPipelineBuilds;
+
+        // The prebuilt shaders are built wherever a game has a list, whatever the browser and the adapter: they are
+        // built before the game starts, when holding up the device costs nothing, and without them a weak GPU draws
+        // everything with the ubershader, a frame a second (startPrebuild()).
+#   if defined(RT64_PREBUILT_SHADERS)
+        prebuiltShaders = (shaderFormat == RenderShaderFormat::WGSL) && (multisampling.sampleCount == 1);
+#   endif
 
 #   if defined(__EMSCRIPTEN__)
         // A page opened with ?record-shaders prints every shader the game asks for, for a list of prebuilt shaders
@@ -141,8 +148,8 @@ namespace RT64 {
         // Create the spec constant shaders before anything draws. plume's WebGPU backend learns from each new shader which
         // stages read which bindings, and when that changes every pipeline gets a new layout: the specialized ones that
         // were drawn with would then be built again in place, holding up the browser's GPU process for seconds. Without
-        // specialized shaders nothing uses them, and each is megabytes of WGSL for the browser to parse.
-        if ((shaderFormat == RenderShaderFormat::WGSL) && specializedShaders) {
+        // specialized or prebuilt shaders nothing needs them, and each is megabytes of WGSL for the browser to parse.
+        if ((shaderFormat == RenderShaderFormat::WGSL) && (specializedShaders || prebuiltShaders)) {
             const RenderShader *vertexShader = nullptr;
             const RenderShader *pixelShader = nullptr;
             for (bool smoothShade : { false, true }) {
@@ -162,12 +169,13 @@ namespace RT64 {
     // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so they all
     // wait for the first frame's draws, and waitForPrebuild() holds the next frame until they are done. Building them
     // takes the browser's GPU process a few at once: there is nothing else for it to do meanwhile. Each one done is
-    // reported to the page as Module.rt64ShaderProgress(done, count), for it to show. They are made for RasterPS's
-    // dual-source variant without MSAA, what the web gets wherever the device has dual-source blending.
+    // reported to the page as Module.rt64ShaderProgress(done, count), for it to show. They are made without MSAA, as
+    // the web draws, with RasterPS both with dual-source blending and without, for a device that lacks it. Where
+    // pipelines are built in line with the device's other work (Firefox) they are built all the same, and only the
+    // shaders the list missed are left to the ubershader (setup()).
     void RasterShaderCache::startPrebuild() {
 #   if defined(RT64_PREBUILT_SHADERS)
-        // Where nothing draws with specialized shaders (Firefox: setup()), nothing is prebuilt either.
-        if (!specializedShaders || (shaderFormat != RenderShaderFormat::WGSL) || (multisampling.sampleCount > 1) || !device->getCapabilities().dualSourceBlending) {
+        if (!prebuiltShaders) {
             return;
         }
 
@@ -233,8 +241,11 @@ namespace RT64 {
             desc.colorCombiner.H = entry.combinerH;
             desc.flags.value = entry.flags;
             const char *text = prebuildText.data();
+            const bool dualSource = device->getCapabilities().dualSourceBlending;
+            const uint32_t pixelOffset = dualSource ? entry.pixelOffset : entry.pixelSingleOffset;
+            const uint32_t pixelSize = dualSource ? entry.pixelSize : entry.pixelSingleSize;
             std::unique_ptr<RasterShader> shader = std::make_unique<RasterShader>(device, desc, shaderUber->pipelineLayout.get(), multisampling,
-                text + entry.vertexOffset, entry.vertexSize, text + entry.pixelOffset, entry.pixelSize);
+                text + entry.vertexOffset, entry.vertexSize, text + pixelOffset, pixelSize);
 
             {
                 const std::unique_lock<std::mutex> lock(GPUShadersMutex);
