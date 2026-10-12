@@ -2,7 +2,7 @@
 
 > [!WARNING]
 > **This is amazingalek/rt64-web, a fork, not [RT64](https://github.com/rt64/rt64).** It makes RT64 build with
-> Emscripten and draw through WebGPU in a web page, for [recomp-web](https://github.com/amazingalek/recomp-web), and
+> Emscripten and draw through WebGPU in a web page, for [N64Recomp-browser](https://github.com/amazingalek/N64Recomp-browser), and
 > everything in it past upstream's commits was written by AI (Claude). It is not made, endorsed or supported by RT64's
 > developers, whose contributing guide bans AI-written code: nothing here is offered upstream, and please don't take
 > issues with this fork to them.

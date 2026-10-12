@@ -4,7 +4,7 @@
 [submodule "src/contrib/hlslpp"]
 	path = src/contrib/hlslpp
 	url = https://github.com/amazingalek/hlslpp-web
-	branch = web
+	branch = main
 [submodule "src/contrib/xess"]
 	path = src/contrib/xess
 	url = https://github.com/intel/xess
@@ -47,4 +47,4 @@
 [submodule "src/contrib/plume"]
 	path = src/contrib/plume
 	url = https://github.com/amazingalek/plume-web
-	branch = web
+	branch = main
