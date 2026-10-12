@@ -418,7 +418,12 @@ namespace RT64 {
         sharedQueueResources->setEmulatorConfig(emulatorConfig);
         sharedQueueResources->setEnhancementConfig(enhancementConfig);
         sharedQueueResources->setSwapChainSize(swapChain->getWidth(), swapChain->getHeight());
+#   if defined(__EMSCRIPTEN__)
+        // A page's window doesn't know the display's rate (ApplicationWindow::detectRefreshRate): the swap chain times it.
+        sharedQueueResources->setSwapChainRate(swapChain->getRefreshRate());
+#   else
         sharedQueueResources->setSwapChainRate(appWindow->getRefreshRate());
+#   endif
         sharedQueueResources->renderTargetManager.setMultisampling(multisampling);
         sharedQueueResources->renderTargetManager.setUsesHDR(usesHDR);
 

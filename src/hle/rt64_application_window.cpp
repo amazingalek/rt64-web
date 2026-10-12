@@ -254,7 +254,11 @@ namespace RT64 {
     }
 
     void ApplicationWindow::detectRefreshRate() {
-#   if defined(_WIN32)
+#   if defined(__EMSCRIPTEN__)
+        // A page can't ask the display. The swap chain times the browser's animation frames instead (displayTiming),
+        // and the present queue takes the smaller of the two rates.
+        refreshRate = UINT32_MAX;
+#   elif defined(_WIN32)
         HMONITOR monitor = MonitorFromWindow(windowHandle, MONITOR_DEFAULTTONEAREST);
         MONITORINFOEX info = {};
         info.cbSize = sizeof(info);
