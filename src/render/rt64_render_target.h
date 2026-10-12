@@ -78,8 +78,9 @@ namespace RT64 {
         static RenderFormat depthBufferFormat();
 
         // WebGPU needs every attachment of a render pass to be the same size, where elsewhere a depth target only has to
-        // be as big as its color target. Grows each pair's color target to its depth target, which must already be at
-        // least as big (the depth target a pair has none of is shared, so it may have grown for a later pair).
+        // be as big as its color target. Grows the targets of each pair to the bigger of the two until every pair
+        // matches: a depth target can be in several pairs (the dummy one, for every color target drawn without depth),
+        // and so can a color target.
         static void matchColorToDepthTargets(RenderWorker *worker, const std::vector<std::pair<RenderTarget *, RenderTarget *>> &colorDepthPairs, std::unordered_set<RenderTarget *> &resizedTargets);
     };
 };
