@@ -120,8 +120,9 @@ namespace RT64 {
 
         // Create the spec constant shaders before anything draws. plume's WebGPU backend learns from each new shader which
         // stages read which bindings, and when that changes every pipeline gets a new layout: the specialized ones that
-        // were drawn with would then be built again in place, holding up the browser's GPU process for seconds.
-        if (shaderFormat == RenderShaderFormat::WGSL) {
+        // were drawn with would then be built again in place, holding up the browser's GPU process for seconds. Without
+        // specialized shaders nothing uses them, and each is megabytes of WGSL for the browser to parse.
+        if ((shaderFormat == RenderShaderFormat::WGSL) && specializedShaders) {
             const RenderShader *vertexShader = nullptr;
             const RenderShader *pixelShader = nullptr;
             for (bool smoothShade : { false, true }) {
