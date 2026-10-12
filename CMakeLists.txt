@@ -598,11 +598,20 @@ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shader
 # Prebuilt shaders for WebGPU. A game that sets RT64_PREBUILT_SHADER_LIST to a list of the shader descriptions it uses
 # (one per line, five hex words: other mode L and H, color combiner L and H, flags, as its page prints them when opened
 # with ?record-shaders) gets each one specialized here: shader_specializer folds the description into the spec constant
-# SPIR-V with re-spirv, naga turns that into WGSL, and the lot goes into rt64 compressed. RasterShaderCache builds them
-# in every browser (startPrebuild()): those above a line reading "background" in the list (all of them without one)
-# before the game gets past its first frame, and the rest behind it. They are made without MSAA, with RasterPS both
-# with dual-source blending (.ps.wgsl) and without (.ps-single.wgsl).
+# SPIR-V with re-spirv, spirv-opt -O cleans up after it, naga turns that into WGSL, and the lot goes into rt64
+# compressed. RasterShaderCache builds them in every browser (startPrebuild()): those above a line reading "background"
+# in the list (all of them without one) before the game gets past its first frame, and the rest behind it. They are
+# made without MSAA, with RasterPS both with dual-source blending (.ps.wgsl) and without (.ps-single.wgsl).
+# re-spirv folds the spec constants and drops the branches they decide, but leaves the rest as dxc wrote it for any
+# description: variables kept in memory, copies, branches on what is now constant. spirv-opt (SPIRV-Tools) takes those
+# out. A RasterPS comes out about 45% smaller (the largest 370 KB to 224 KB), descriptions that differ only in what
+# RasterPS ignores come out the same and are kept once (GoldenEye's 340: 624 different stages to 210, 103 MB of WGSL
+# to 16), and Chrome builds them in about 60% of the time. Without spirv-opt they are the same shaders, only bigger.
 if (RT64_WGSL AND RT64_PREBUILT_SHADER_LIST)
+    find_program(RT64_SPIRV_OPT_EXECUTABLE spirv-opt)
+    if (NOT RT64_SPIRV_OPT_EXECUTABLE)
+        message(WARNING "spirv-opt not found: the prebuilt shaders' WGSL is about twice the size. Install SPIRV-Tools or set RT64_SPIRV_OPT_EXECUTABLE.")
+    endif()
     add_subdirectory(src/tools/shader_specializer)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${RT64_PREBUILT_SHADER_LIST})
     file(STRINGS ${RT64_PREBUILT_SHADER_LIST} PREBUILT_LINES REGEX "^[0-9a-fA-F]+( +[0-9a-fA-F]+)( +[0-9a-fA-F]+)( +[0-9a-fA-F]+)( +[0-9a-fA-F]+)")
@@ -617,23 +626,31 @@ if (RT64_WGSL AND RT64_PREBUILT_SHADER_LIST)
         # The flags' fourth bit is smoothShade.
         math(EXPR PREBUILT_SMOOTH "(0x${PREBUILT_FLAGS} >> 3) & 1")
         if (PREBUILT_SMOOTH)
-            set(PREBUILT_VS "${PREBUILT_SPIRV}/RasterVSSpecConstant.hlsl.wgsl.spv")
-            set(PREBUILT_PS "${PREBUILT_SPIRV}/RasterPSSpecConstantDualSource.hlsl.wgsl.spv")
-            set(PREBUILT_PS_SINGLE "${PREBUILT_SPIRV}/RasterPSSpecConstant.hlsl.wgsl.spv")
+            set(PREBUILT_SPIRV_vs "${PREBUILT_SPIRV}/RasterVSSpecConstant.hlsl.wgsl.spv")
+            set(PREBUILT_SPIRV_ps "${PREBUILT_SPIRV}/RasterPSSpecConstantDualSource.hlsl.wgsl.spv")
+            set(PREBUILT_SPIRV_ps-single "${PREBUILT_SPIRV}/RasterPSSpecConstant.hlsl.wgsl.spv")
         else()
-            set(PREBUILT_VS "${PREBUILT_SPIRV}/RasterVSSpecConstantFlat.hlsl.wgsl.spv")
-            set(PREBUILT_PS "${PREBUILT_SPIRV}/RasterPSSpecConstantFlatDualSource.hlsl.wgsl.spv")
-            set(PREBUILT_PS_SINGLE "${PREBUILT_SPIRV}/RasterPSSpecConstantFlat.hlsl.wgsl.spv")
+            set(PREBUILT_SPIRV_vs "${PREBUILT_SPIRV}/RasterVSSpecConstantFlat.hlsl.wgsl.spv")
+            set(PREBUILT_SPIRV_ps "${PREBUILT_SPIRV}/RasterPSSpecConstantFlatDualSource.hlsl.wgsl.spv")
+            set(PREBUILT_SPIRV_ps-single "${PREBUILT_SPIRV}/RasterPSSpecConstantFlat.hlsl.wgsl.spv")
         endif()
         set(PREBUILT_OUT "${PREBUILT_DIR}/${PREBUILT_KEY}")
+        set(PREBUILT_COMMANDS)
+        foreach(PREBUILT_STAGE vs ps ps-single)
+            if (RT64_SPIRV_OPT_EXECUTABLE)
+                list(APPEND PREBUILT_COMMANDS
+                    COMMAND shader_specializer specialize ${PREBUILT_SPIRV_${PREBUILT_STAGE}} ${PREBUILT_OUT}.${PREBUILT_STAGE}.specialized.spv ${PREBUILT_WORDS}
+                    COMMAND ${RT64_SPIRV_OPT_EXECUTABLE} -O ${PREBUILT_OUT}.${PREBUILT_STAGE}.specialized.spv -o ${PREBUILT_OUT}.${PREBUILT_STAGE}.spv)
+            else()
+                list(APPEND PREBUILT_COMMANDS
+                    COMMAND shader_specializer specialize ${PREBUILT_SPIRV_${PREBUILT_STAGE}} ${PREBUILT_OUT}.${PREBUILT_STAGE}.spv ${PREBUILT_WORDS})
+            endif()
+            list(APPEND PREBUILT_COMMANDS
+                COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.${PREBUILT_STAGE}.spv ${PREBUILT_OUT}.${PREBUILT_STAGE}.wgsl)
+        endforeach()
         add_custom_command(OUTPUT ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl ${PREBUILT_OUT}.ps-single.wgsl
-            COMMAND shader_specializer specialize ${PREBUILT_VS} ${PREBUILT_OUT}.vs.spv ${PREBUILT_WORDS}
-            COMMAND shader_specializer specialize ${PREBUILT_PS} ${PREBUILT_OUT}.ps.spv ${PREBUILT_WORDS}
-            COMMAND shader_specializer specialize ${PREBUILT_PS_SINGLE} ${PREBUILT_OUT}.ps-single.spv ${PREBUILT_WORDS}
-            COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.vs.spv ${PREBUILT_OUT}.vs.wgsl
-            COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.ps.spv ${PREBUILT_OUT}.ps.wgsl
-            COMMAND ${RT64_NAGA_EXECUTABLE} --input-kind spv --keep-coordinate-space ${PREBUILT_OUT}.ps-single.spv ${PREBUILT_OUT}.ps-single.wgsl
-            DEPENDS shader_specializer ${PREBUILT_VS} ${PREBUILT_PS} ${PREBUILT_PS_SINGLE})
+            ${PREBUILT_COMMANDS}
+            DEPENDS shader_specializer ${PREBUILT_SPIRV_vs} ${PREBUILT_SPIRV_ps} ${PREBUILT_SPIRV_ps-single})
         list(APPEND PREBUILT_OUTPUTS ${PREBUILT_OUT}.vs.wgsl ${PREBUILT_OUT}.ps.wgsl ${PREBUILT_OUT}.ps-single.wgsl)
     endforeach()
     add_custom_command(OUTPUT ${PREBUILT_DIR}/rt64_prebuilt_shaders.c
