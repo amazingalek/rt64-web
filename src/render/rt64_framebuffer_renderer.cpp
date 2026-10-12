@@ -642,7 +642,12 @@ namespace RT64 {
                 const interop::RSPVertexTestZCB &testZCB = drawCall.vertexTestZ;
                 switchToDepthRead();
 
+#           if defined(__EMSCRIPTEN__)
+                // A target without MSAA has a sample count of 1, and WebGPU refuses the multisampled shader on it.
+                const bool useMSAA = (fbStorage->colorTarget->multisampling.sampleCount > 1);
+#           else
                 const bool useMSAA = (fbStorage->colorTarget->multisampling.sampleCount > 0);
+#           endif
                 const auto &rspVertexTestZ = useMSAA ? shaderLibrary->rspVertexTestZMS : shaderLibrary->rspVertexTestZ;
                 worker->commandList->barriers(RenderBarrierStage::COMPUTE, RenderBufferBarrier(testZIndexBuffer, RenderBufferAccess::WRITE));
                 worker->commandList->setPipeline(rspVertexTestZ.pipeline.get());
