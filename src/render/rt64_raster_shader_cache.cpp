@@ -12,9 +12,15 @@
 
 #if defined(RT64_PREBUILT_SHADERS)
 #   include <cstring>
+#   include <numeric>
 #   include <zstd.h>
 #   include "common/rt64_elapsed_timer.h"
 #   include "rt64_prebuilt_shaders.h"
+
+// The size of the pixel shader built for a prebuilt shader, on a device with dual-source blending or without.
+static uint32_t prebuiltPixelSize(const RT64PrebuiltShader &entry, bool dualSource) {
+    return dualSource ? entry.pixelSize : entry.pixelSingleSize;
+}
 #endif
 
 // On WebGPU a specialized RasterPS takes 1.4-2 s to build in the browser's GPU process (Chrome, RTX 2070). plume's
@@ -165,13 +171,21 @@ namespace RT64 {
     // costs several times what they do per pixel (on a laptop's Intel graphics it was the difference between a frame
     // a second and 60), and no shader is built in the middle of a race. Built from the ubershader's WGSL with the spec
     // constants as overrides, a specialized RasterPS took 6 s cold in Chrome (RTX 2070); specialized beforehand, 1-1.6 s,
-    // and one game's 105 took 13-18 s together. Chrome keeps them for no later visit: its pipeline cache is far smaller.
+    // and one game's 105 took 13-18 s together. Chrome keeps them in its WebGPU cache, so a later visit builds them all
+    // in under a second (Chrome 154: 0.4 s). That cache holds 6 MB a profile, every site's together, and those 105 and
+    // the launcher's took 5.6 MB of it: past it, the least recently used go, and every visit builds again.
     // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so they all
     // wait for the first frame's draws. waitForPrebuild() then holds the next frame until the first part of the list is
     // done, the shaders the game's first screens use (above the list's "background" line; all of them without one), so
-    // a long list doesn't keep the player waiting: GoldenEye's 340 took ~85 s. Building that part takes the browser's
-    // GPU process a few at once: there is nothing else for it to do meanwhile. Each one of it done is reported to the
-    // page as Module.rt64ShaderProgress(done, count), for it to show. Then one thread builds the rest behind the game,
+    // a long list doesn't keep the player waiting: GoldenEye's 340 took ~85 s. The browser's GPU process builds that
+    // part on as many threads as it has cores, and there is nothing else for it to do meanwhile, so as many are in
+    // flight, largest first: a shader's WGSL size goes with its build time, and the largest (370 KB against a median of
+    // 65 KB) started last would leave the other threads idle while it finished. Each one of it done is reported to the
+    // page as Module.rt64ShaderProgress(done, count, fraction) for it to show, the fraction by WGSL size, the nearest
+    // thing to time there is, with each one in flight counted half done: counting only the ones done, the first
+    // seconds read as a third of the pace they were, since every thread starts on one of the largest. Rush 2049's 105
+    // took 15.6-16.7 s six at a time in the list's order, and 6.9-7.2 s twelve at a time largest first (2026-10-12,
+    // 12 cores, all of them busy with other work). Then one thread builds the rest behind the game,
     // in the list's order but first any a draw asks for (hurryPrebuild()), which draws with the ubershader until its
     // shader is built; more at once take cores the game's frames need. They are made without MSAA, as the web draws,
     // with RasterPS both with dual-source blending and without, for a device that lacks it. Where pipelines are built
@@ -212,7 +226,20 @@ namespace RT64 {
         prebuildWaitCount = specializedShaders ? RT64PrebuiltShaderWaitCount : RT64PrebuiltShaderCount;
         prebuildState.assign(prebuildCount, PrebuildQueued);
         prebuildBusy = true;
-        const uint32_t threads = std::clamp(std::thread::hardware_concurrency() / 2U, 1U, 8U);
+
+        // The part the game waits for largest first, the rest in the list's order.
+        const bool dualSource = device->getCapabilities().dualSourceBlending;
+        prebuildOrder.resize(prebuildCount);
+        std::iota(prebuildOrder.begin(), prebuildOrder.end(), 0U);
+        std::stable_sort(prebuildOrder.begin(), prebuildOrder.begin() + prebuildWaitCount, [dualSource](uint32_t a, uint32_t b) {
+            return prebuiltPixelSize(RT64PrebuiltShaderList[a], dualSource) > prebuiltPixelSize(RT64PrebuiltShaderList[b], dualSource);
+        });
+
+        for (uint32_t i = 0; i < prebuildWaitCount; i++) {
+            prebuildWaitSize += RT64PrebuiltShaderList[i].vertexSize + prebuiltPixelSize(RT64PrebuiltShaderList[i], dualSource);
+        }
+
+        const uint32_t threads = std::clamp(std::thread::hardware_concurrency(), 2U, 16U);
         for (uint32_t t = 0; t < threads; t++) {
             prebuildThreads.emplace_back(&RasterShaderCache::prebuildLoop, this, t);
         }
@@ -221,15 +248,17 @@ namespace RT64 {
 #   endif
     }
 
-    void RasterShaderCache::reportPrebuild(uint32_t done) {
+    void RasterShaderCache::reportPrebuild(uint32_t done, uint64_t sizeDone, uint64_t sizeStarted) {
 #   if defined(__EMSCRIPTEN__)
-        MAIN_THREAD_ASYNC_EM_ASM({ if (Module['rt64ShaderProgress']) Module['rt64ShaderProgress']($0, $1); }, done, prebuildWaitCount);
+        const double fraction = (prebuildWaitSize > 0) ? double(sizeDone + sizeStarted) / double(2 * prebuildWaitSize) : 1.0;
+        MAIN_THREAD_ASYNC_EM_ASM({ if (Module['rt64ShaderProgress']) Module['rt64ShaderProgress']($0, $1, $2); }, done, prebuildWaitCount, fraction);
 #   endif
     }
 
     void RasterShaderCache::prebuildLoop(uint32_t thread) {
 #   if defined(RT64_PREBUILT_SHADERS)
         Thread::setCurrentThreadName("RT64 Prebuild");
+        const bool dualSource = device->getCapabilities().dualSourceBlending;
         while (true) {
             uint32_t index = UINT32_MAX;
             {
@@ -249,8 +278,8 @@ namespace RT64 {
                 }
 
                 while ((index == UINT32_MAX) && (prebuildNext < prebuildCount)) {
-                    if (prebuildState[prebuildNext] != PrebuildTaken) {
-                        index = prebuildNext;
+                    if (prebuildState[prebuildOrder[prebuildNext]] != PrebuildTaken) {
+                        index = prebuildOrder[prebuildNext];
                     }
 
                     prebuildNext++;
@@ -261,6 +290,9 @@ namespace RT64 {
                 }
 
                 prebuildState[index] = PrebuildTaken;
+                if (index < prebuildWaitCount) {
+                    prebuildWaitSizeStarted += RT64PrebuiltShaderList[index].vertexSize + prebuiltPixelSize(RT64PrebuiltShaderList[index], dualSource);
+                }
             }
 
             const RT64PrebuiltShader &entry = RT64PrebuiltShaderList[index];
@@ -272,9 +304,8 @@ namespace RT64 {
             desc.colorCombiner.H = entry.combinerH;
             desc.flags.value = entry.flags;
             const char *text = prebuildText.data();
-            const bool dualSource = device->getCapabilities().dualSourceBlending;
             const uint32_t pixelOffset = dualSource ? entry.pixelOffset : entry.pixelSingleOffset;
-            const uint32_t pixelSize = dualSource ? entry.pixelSize : entry.pixelSingleSize;
+            const uint32_t pixelSize = prebuiltPixelSize(entry, dualSource);
             std::unique_ptr<RasterShader> shader = std::make_unique<RasterShader>(device, desc, shaderUber->pipelineLayout.get(), multisampling,
                 text + entry.vertexOffset, entry.vertexSize, text + pixelOffset, pixelSize);
 
@@ -285,10 +316,14 @@ namespace RT64 {
 
             const bool waitedFor = (index < prebuildWaitCount);
             uint32_t waitDone = 0;
+            uint64_t sizeDone = 0, sizeStarted = 0;
             {
                 std::unique_lock<std::mutex> lock(prebuildMutex);
                 if (waitedFor) {
                     waitDone = ++prebuildWaitDone;
+                    prebuildWaitSizeDone += entry.vertexSize + pixelSize;
+                    sizeDone = prebuildWaitSizeDone;
+                    sizeStarted = prebuildWaitSizeStarted;
                     if (waitDone == prebuildWaitCount) {
                         printf("RT64: the %u prebuilt shaders the game waits for built in %.1f s\n", prebuildWaitCount, prebuildTimer.elapsedSeconds());
                     }
@@ -303,7 +338,7 @@ namespace RT64 {
 
             prebuildChanged.notify_all();
             if (waitedFor) {
-                reportPrebuild(waitDone);
+                reportPrebuild(waitDone, sizeDone, sizeStarted);
             }
         }
 #   endif
@@ -400,7 +435,7 @@ namespace RT64 {
             // from there: nothing the launcher draws uses them.
             if ((prebuildCount > 0) && !prebuildDrawn.exchange(true)) {
                 prebuildTimer.reset();
-                reportPrebuild(0);
+                reportPrebuild(0, 0, 0);
             }
 
             if (prebuildBusy) {

@@ -65,6 +65,10 @@ namespace RT64 {
         uint32_t prebuildNext = 0;
         uint32_t prebuildWaitCount = 0;
         uint32_t prebuildWaitDone = 0;
+        std::vector<uint32_t> prebuildOrder;
+        uint64_t prebuildWaitSize = 0;
+        uint64_t prebuildWaitSizeDone = 0;
+        uint64_t prebuildWaitSizeStarted = 0;
         enum : uint8_t { PrebuildQueued, PrebuildHurried, PrebuildTaken };
         std::vector<uint8_t> prebuildState;
         std::queue<uint32_t> prebuildUrgent;
@@ -82,7 +86,7 @@ namespace RT64 {
         void startPrebuild();
         void prebuildLoop(uint32_t thread);
         void hurryPrebuild(uint64_t shaderHash);
-        void reportPrebuild(uint32_t done);
+        void reportPrebuild(uint32_t done, uint64_t sizeDone, uint64_t sizeStarted);
         void waitForPrebuild();
         void destroyAll();
         RasterShader *getGPUShader(const ShaderDescription &desc);
