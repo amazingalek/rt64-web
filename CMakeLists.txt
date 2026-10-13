@@ -150,10 +150,25 @@ set (DXC_CS_OPTS "${DXC_COMMON_OPTS}" "-E" "CSMain" "-T cs_6_3")
 set (DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T gs_6_3")
 set (DXC_RT_OPTS "${DXC_COMMON_OPTS}" "-D" "RT_SHADER" "-T" "lib_6_3" "-fspv-target-env=vulkan1.1spirv1.4" "-fspv-extension=SPV_KHR_ray_tracing" "-fspv-extension=SPV_EXT_descriptor_indexing")
 
+# A shader's .hlsli and shared headers are in the depfile dxc writes with -MF, so a change to one rebuilds every shader
+# that includes it. -MF only preprocesses, so the compile is a second command. Other generators (Visual Studio, Xcode)
+# rebuild a shader only when its own file changes, as before.
+function(add_dxc_command OUTPUT FILENAME)
+    if (CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
+        add_custom_command(OUTPUT ${OUTPUT}
+            COMMAND ${DXC} ${ARGN} ${FILENAME} /Fo ${OUTPUT} -MF ${OUTPUT}.d
+            COMMAND ${DXC} ${ARGN} ${FILENAME} /Fo ${OUTPUT}
+            DEPENDS ${FILENAME}
+            DEPFILE ${OUTPUT}.d)
+    else()
+        add_custom_command(OUTPUT ${OUTPUT}
+            COMMAND ${DXC} ${ARGN} ${FILENAME} /Fo ${OUTPUT}
+            DEPENDS ${FILENAME})
+    endif()
+endfunction()
+
 function(build_shader_spirv_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
-    add_custom_command(OUTPUT ${OUTNAME}.spv
-        COMMAND ${DXC} ${DXC_SPV_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.spv
-        DEPENDS ${FILENAME})
+    add_dxc_command(${OUTNAME}.spv ${FILENAME} ${DXC_SPV_OPTS} ${ARGN})
     add_custom_command(OUTPUT ${OUTNAME}.spirv.c
         COMMAND file_to_c ${OUTNAME}.spv ${TARGET_NAME}BlobSPIRV ${OUTNAME}.spirv.c ${OUTNAME}.spirv.h
         DEPENDS ${OUTNAME}.spv file_to_c
@@ -165,9 +180,7 @@ function(build_shader_wgsl_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
     # WebGPU's clip space is D3D's, so the vertex shaders keep their y.
     set(OPTIONS ${ARGN})
     list(REMOVE_ITEM OPTIONS "-fvk-invert-y")
-    add_custom_command(OUTPUT ${OUTNAME}.wgsl.spv
-        COMMAND ${DXC} ${DXC_SPV_OPTS} -D WEBGPU ${OPTIONS} ${FILENAME} /Fo ${OUTNAME}.wgsl.spv
-        DEPENDS ${FILENAME})
+    add_dxc_command(${OUTNAME}.wgsl.spv ${FILENAME} ${DXC_SPV_OPTS} -D WEBGPU ${OPTIONS})
     add_custom_command(OUTPUT ${OUTNAME}.wgsl ${OUTNAME}.wgsl.c ${OUTNAME}.wgsl.h
         COMMAND ${CMAKE_COMMAND} -DNAGA=${RT64_NAGA_EXECUTABLE} -DINPUT=${OUTNAME}.wgsl.spv -DOUTPUT=${OUTNAME}.wgsl
             -DVAR_NAME=${TARGET_NAME}BlobWGSL -DOUTPUT_C=${OUTNAME}.wgsl.c -DOUTPUT_H=${OUTNAME}.wgsl.h -P ${RT64_PLUME_WGSL}
@@ -176,9 +189,7 @@ function(build_shader_wgsl_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
 endfunction()
 
 function(build_shader_dxil_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
-    add_custom_command(OUTPUT ${OUTNAME}.dxil
-        COMMAND ${DXC} ${DXC_DXIL_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.dxil
-        DEPENDS ${FILENAME})
+    add_dxc_command(${OUTNAME}.dxil ${FILENAME} ${DXC_DXIL_OPTS} ${ARGN})
     add_custom_command(OUTPUT ${OUTNAME}.dxil.c
         COMMAND file_to_c ${OUTNAME}.dxil ${TARGET_NAME}BlobDXIL ${OUTNAME}.dxil.c ${OUTNAME}.dxil.h
         DEPENDS ${OUTNAME}.dxil file_to_c
@@ -187,9 +198,7 @@ function(build_shader_dxil_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
 endfunction()
 
 function(build_shader_msl_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
-    add_custom_command(OUTPUT ${OUTNAME}.spv
-            COMMAND ${DXC} ${DXC_SPV_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.spv
-            DEPENDS ${FILENAME})
+    add_dxc_command(${OUTNAME}.spv ${FILENAME} ${DXC_SPV_OPTS} ${ARGN})
     add_custom_command(OUTPUT ${OUTNAME}.metal
             COMMAND spirv_cross_msl ${OUTNAME}.spv ${OUTNAME}.metal
             DEPENDS ${OUTNAME}.spv spirv_cross_msl)
