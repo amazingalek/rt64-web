@@ -4,6 +4,7 @@
 
 #include "rt64_state.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cinttypes>
 
@@ -83,6 +84,7 @@ namespace RT64 {
         displayListAddress = 0;
         displayListCounter = 0;
         rdramCheckPending = true;
+        pendingRAMCopies.clear();
         workloadCounter = 0;
         lastScreenHash = 0;
         lastScreenFactorCounter = 0;
@@ -617,6 +619,8 @@ namespace RT64 {
     }
     
     void State::checkRDRAM() {
+        landRAMCopies(false);
+
         if (!rdramCheckPending) {
             return;
         }
@@ -781,6 +785,63 @@ namespace RT64 {
         }
     }
     
+    void State::landRAMCopies(bool onlyIfReady) {
+        if (pendingRAMCopies.empty()) {
+            return;
+        }
+
+        if (onlyIfReady) {
+            for (const PendingRAMCopy &copy : pendingRAMCopies) {
+                Framebuffer *fb = framebufferManager.find(copy.address);
+                if ((fb != nullptr) && !fb->nativeTarget.isNextCopyToRAMReady()) {
+                    return;
+                }
+            }
+        }
+
+        ext.framebufferGraphicsWorker->wait();
+
+        // RDRAM still holds what it held when the list ended (its hash then is the framebuffer's), unless the CPU wrote
+        // to it since: then the CPU's write stays, and the next list sees it as a change, as it would any other.
+        thread_local std::vector<std::pair<Framebuffer *, bool>> landedFbs;
+        landedFbs.clear();
+        for (const PendingRAMCopy &copy : pendingRAMCopies) {
+            Framebuffer *fb = framebufferManager.find(copy.address);
+            if ((fb == nullptr) || (fb->nativeTarget.writeBufferHistoryIndex >= fb->nativeTarget.writeBufferHistoryCount)) {
+                continue;
+            }
+
+            auto it = std::find_if(landedFbs.begin(), landedFbs.end(), [fb](const std::pair<Framebuffer *, bool> &p) { return p.first == fb; });
+            if (it == landedFbs.end()) {
+                const bool cpuWrote = (XXH3_64bits(&RDRAM[fb->addressStart], fb->RAMBytes) != fb->RAMHash);
+                if (cpuWrote) {
+                    static bool reported = false;
+                    if (!reported) {
+                        fprintf(stderr, "RT64: the CPU wrote to the framebuffer at 0x%08X before its frame was copied to RAM a list late; it keeps what the CPU wrote\n", fb->addressStart);
+                        reported = true;
+                    }
+                }
+
+                it = landedFbs.emplace(landedFbs.end(), fb, !cpuWrote);
+            }
+
+            if (it->second) {
+                fb->copyNativeToRAM(&RDRAM[fb->addressStart], copy.rowWidth, copy.rowStart, copy.rowEnd);
+            }
+            else {
+                fb->nativeTarget.writeBufferHistoryIndex++;
+            }
+        }
+
+        for (const auto &landedFb : landedFbs) {
+            if (landedFb.second) {
+                landedFb.first->RAMHash = XXH3_64bits(&RDRAM[landedFb.first->addressStart], landedFb.first->RAMBytes);
+            }
+        }
+
+        pendingRAMCopies.clear();
+    }
+
     void State::listProcessBegin() {
         dlCpuProfiler.start();
     }
@@ -790,6 +851,7 @@ namespace RT64 {
     }
 
     void State::fullSync() {
+        landRAMCopies(false);
         flush();
         submitFramebufferPair(FramebufferPair::FlushReason::ProcessDisplayListsEnd);
 
@@ -1268,6 +1330,9 @@ namespace RT64 {
             };
 
             auto renderAndSynchronize = [&](uint32_t maxFramebufferPair) {
+                // The last batch's copies to RAM can wait for the next list (renderToRAMLate): nothing in this one reads them.
+                const bool copyLate = ext.emulatorConfig->framebuffer.renderToRAMLate && (maxFramebufferPair == workload.fbPairCount);
+
                 // Preprocess all the framebuffer operations.
                 uint32_t pairCursor = framebufferPairCursor;
                 while (pairCursor < maxFramebufferPair) {
@@ -1475,15 +1540,26 @@ namespace RT64 {
                 ext.framebufferGraphicsWorker->commandList->end();
                 framebufferRenderer->waitForUploaders();
                 ext.framebufferGraphicsWorker->execute();
-                ext.framebufferGraphicsWorker->wait();
+                if (!copyLate) {
+                    ext.framebufferGraphicsWorker->wait();
+                }
+
+                auto copyToRAM = [&](Framebuffer *fb, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd) {
+                    if (copyLate) {
+                        pendingRAMCopies.push_back({ fb->addressStart, rowWidth, rowStart, rowEnd });
+                    }
+                    else {
+                        fb->copyNativeToRAM(&RDRAM[fb->addressStart], rowWidth, rowStart, rowEnd);
+                    }
+                };
 
                 pairCursor = framebufferPairCursor;
                 while (pairCursor < maxFramebufferPair) {
                     if (getFramebufferPairs(pairCursor)) {
-                        colorFb->copyNativeToRAM(&RDRAM[colorFb->addressStart], colorWriteWidth, colorRowStart, std::min(colorRowEnd, colorFb->height));
+                        copyToRAM(colorFb, colorWriteWidth, colorRowStart, std::min(colorRowEnd, colorFb->height));
 
                         if (depthWriteWidth > 0) {
-                            depthFb->copyNativeToRAM(&RDRAM[depthFb->addressStart], depthWriteWidth, depthRowStart, std::min(depthRowEnd, depthFb->height));
+                            copyToRAM(depthFb, depthWriteWidth, depthRowStart, std::min(depthRowEnd, depthFb->height));
                         }
                     }
 
@@ -1840,6 +1916,10 @@ namespace RT64 {
     }
     
     void State::updateScreen(const VI &newVI, bool fromEarlyPresent) {
+        // A frame copied to RAM a list late (renderToRAMLate) lands at the first VI after the GPU has finished it, or when
+        // the next list starts if that comes first.
+        landRAMCopies(true);
+
         // If the debugger has paused the plugin, keep submitting the last workload and screen VI for rendering and a present event.
         if (debuggerInspector.paused && !fromEarlyPresent) {
             if (ext.userConfig->developerMode) {
@@ -1913,6 +1993,7 @@ namespace RT64 {
                     const uint8_t *fbRAM = &RDRAM[screenFb->addressStart];
                     uint64_t currentHash = XXH3_64bits(fbRAM, screenFb->RAMBytes);
                     if (currentHash != screenFb->RAMHash) {
+                        landRAMCopies(false);
                         {
                             RenderWorkerExecution workerExecution(worker);
                             thread_local std::vector<uint32_t> fbDiscards;

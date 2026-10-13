@@ -91,6 +91,16 @@ namespace RT64 {
         std::vector<uint32_t> drawFbDiscards;
         std::vector<DisplayList *> returnAddressStack;
         std::vector<Framebuffer *> differentFbs;
+
+        // Render to RAM copies waiting for the next list or screen update (renderToRAMLate), in the order they were drawn.
+        struct PendingRAMCopy {
+            uint32_t address;
+            uint32_t rowWidth;
+            uint32_t rowStart;
+            uint32_t rowEnd;
+        };
+
+        std::vector<PendingRAMCopy> pendingRAMCopies;
         GameConfiguration gameConfig;
         uint32_t displayListAddress;
         uint64_t displayListCounter;
@@ -144,6 +154,7 @@ namespace RT64 {
         void flush();
         void submitFramebufferPair(FramebufferPair::FlushReason flushReason);
         void checkRDRAM();
+        void landRAMCopies(bool onlyIfReady);
         void fullSync();
         void fullSyncFramebufferPairTiles(Workload &workload, FramebufferPair &fbPair, uint32_t &loadOpCursor, uint32_t &rdpTileCursor);
         void listProcessBegin();

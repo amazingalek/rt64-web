@@ -369,4 +369,8 @@ namespace RT64 {
         writeBuffer.nativeReadbackBuffer->unmap();
         writeBufferHistoryIndex++;
     }
+
+    bool NativeTarget::isNextCopyToRAMReady() {
+        return (writeBufferHistoryIndex >= writeBufferHistoryCount) || writeBufferHistory[writeBufferHistoryIndex].nativeReadbackBuffer->isMapReady();
+    }
 };
