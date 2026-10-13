@@ -578,7 +578,9 @@ namespace RT64 {
     }
 
     void RasterShaderCache::submit(const ShaderDescription &desc) {
-        if (!specializedShaders && !recordShaders) {
+        // A browser that builds no shaders during play (Firefox) still learns the ones the list missed, and builds them
+        // with their section on the next visit.
+        if (!specializedShaders && !recordShaders && (prebuildCount == 0)) {
             return;
         }
 
