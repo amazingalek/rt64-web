@@ -152,7 +152,7 @@ set (DXC_RT_OPTS "${DXC_COMMON_OPTS}" "-D" "RT_SHADER" "-T" "lib_6_3" "-fspv-tar
 
 # A shader's .hlsli and shared headers are in the depfile dxc writes with -MF, so a change to one rebuilds every shader
 # that includes it. -MF only preprocesses, so the compile is a second command. Other generators (Visual Studio, Xcode)
-# rebuild a shader only when its own file changes, as before.
+# rebuild a shader only when its own file changes.
 function(add_dxc_command OUTPUT FILENAME)
     if (CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
         add_custom_command(OUTPUT ${OUTPUT}

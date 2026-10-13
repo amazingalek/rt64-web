@@ -222,7 +222,7 @@ namespace RT64 {
     // game waits and the browser's GPU process has nothing else to do, largest first: a shader's WGSL size goes with
     // its build time, and the largest (370 KB against a median of 65 KB) started last would leave the other threads idle
     // while it finished. Rush 2049's 105 took 15.6-16.7 s six at a time in the list's order, and 6.9-7.2 s twelve at a
-    // time largest first (2026-10-12, 12 cores, all of them busy with other work). Each one of a round done is reported
+    // time largest first (2026-10-12, Chrome 154 headless, RTX 2070, 12 cores). Each one of a round done is reported
     // to the page as Module.rt64ShaderProgress(done, count, fraction) for it to show, the fraction by WGSL size, the
     // nearest thing to time there is, with each one in flight counted half done: counting only the ones done, the
     // first seconds read as a third of the pace they were, since every thread starts on one of the largest. They are

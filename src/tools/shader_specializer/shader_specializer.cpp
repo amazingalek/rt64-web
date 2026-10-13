@@ -13,8 +13,7 @@
 //       description's shaders are in it (rt64_prebuilt_shaders.h). Shaders that come out the same are kept once. A line
 //       reading "section <name>" starts a section, a screen or level of the game, which it builds when it first draws
 //       with its shaders; the lines above the first one are section 0, "boot", built before the game starts. A
-//       description can be in several sections and is kept once. A line reading "background", which split lists in
-//       two before sections, starts one too.
+//       description can be in several sections and is kept once. A line reading "background" starts one too.
 
 #include <algorithm>
 #include <cstdint>
