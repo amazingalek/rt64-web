@@ -57,6 +57,11 @@ namespace RT64 {
         Timestamp presentTimestamp;
         VIHistory viHistory;
         bool presentWaitEnabled = false;
+        uint32_t pacingMultiple = 0;
+        std::vector<Timestamp> pacingSkips;
+        Timestamp pacingChanged;
+        Timestamp pacingRaised;
+        int64_t pacingRetryMicro = 0;
 
         PresentQueue();
         ~PresentQueue();
@@ -69,6 +74,7 @@ namespace RT64 {
         void setup(const External &ext);
         void threadPresent(const Present &present, bool &swapChainValid);
         void skipInterpolation();
+        void pace(bool presentDropped);
         void notifyPresentId(const Present &present);
         void threadAdvanceBarrier();
         void threadLoop();

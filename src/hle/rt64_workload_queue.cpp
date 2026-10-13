@@ -240,6 +240,12 @@ namespace RT64 {
         // Store the rate that was chosen for the configuration.
         ext.sharedResources->targetRate = workloadConfig.targetRate;
 
+        // A lower rate the present queue paces the frames to while the GPU can't keep up with this one (PresentQueue::pace()).
+        const uint32_t pacedRate = ext.sharedResources->pacedRate;
+        if ((pacedRate > 0) && (pacedRate < workloadConfig.targetRate)) {
+            workloadConfig.targetRate = pacedRate;
+        }
+
 #   if RT_ENABLED
         workloadConfig.raytracingEnabled = rtEnabled;
 

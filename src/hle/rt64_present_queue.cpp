@@ -114,6 +114,12 @@ namespace RT64 {
             targetRate = ext.sharedResources->targetRate;
         }
 
+        // Presents are paced to a lower rate while the GPU can't keep up (pace()).
+        const uint32_t pacedRate = ext.sharedResources->pacedRate;
+        if ((pacedRate > 0) && (pacedRate < targetRate)) {
+            targetRate = pacedRate;
+        }
+
         RenderTarget *colorTarget = nullptr;
         int32_t framesToPresent = 1;
         bool lockedWorkloadMutex = false;
@@ -416,6 +422,95 @@ namespace RT64 {
         ext.sharedResources->interpolatedCondition.notify_all();
     }
 
+    // Frames interpolated to the display's rate are drawn for evenly spaced moments, so motion looks even only if each
+    // is presented. When the GPU can't keep up, a game frame whose present is still waiting behind the next one is
+    // dropped whole, and the rest get one, two or three presents: some frames shown three times, some never. That
+    // happens in Chrome and Firefox alike on a laptop's integrated graphics. So while frames are being dropped (2 in a
+    // second), each game frame gets fewer presents, a number that divides the display's rate evenly (a 30 fps game on
+    // a 60 Hz display: 1, at 30 a second), and a while later it tries the number above again: after 10 s, twice as long
+    // each time it falls straight back (2 min at most). The number is kept, not the rate, since a game's own rate moves
+    // (Banjo-Kazooie's between 20 and 30).
+    void PresentQueue::pace(bool presentDropped) {
+        const uint32_t targetRate = ext.sharedResources->targetRate;
+        const uint32_t originalRate = ext.sharedResources->viOriginalRate;
+        if ((targetRate == 0) || (originalRate == 0) || (targetRate <= originalRate)) {
+            pacingMultiple = 0;
+            pacingSkips.clear();
+            ext.sharedResources->pacedRate = 0;
+            return;
+        }
+
+        // Whether a number of presents a game frame is fewer than the display's rate gives it (by more than 5%), and
+        // whether it is spaced evenly on the display: the display's rate a whole multiple of the presents' (within 5%,
+        // for a 59 Hz display), or one a frame.
+        auto isFewer = [&](uint32_t multiple) {
+            return (multiple * originalRate * 20) < (targetRate * 19);
+        };
+
+        auto isEven = [&](uint32_t multiple) {
+            const uint32_t rate = multiple * originalRate;
+            const uint32_t whole = (targetRate + rate / 2) / rate;
+            return (multiple == 1) || ((whole > 0) && (uint32_t(std::abs(int(targetRate) - int(whole * rate))) * 20 <= targetRate));
+        };
+
+        // The most presents a game frame can get that are fewer and even, at most a number, or one.
+        auto pacedMultipleAtMost = [&](uint32_t multiple) {
+            while ((multiple > 1) && (!isFewer(multiple) || !isEven(multiple))) {
+                multiple--;
+            }
+
+            return std::max(multiple, 1U);
+        };
+
+        const Timestamp now = Timer::current();
+        const int64_t minRetryMicro = 10'000'000;
+        const int64_t maxRetryMicro = 120'000'000;
+        const int64_t fallBackMicro = 3'000'000;
+        if (pacingRetryMicro == 0) {
+            pacingRetryMicro = minRetryMicro;
+            pacingChanged = now;
+        }
+
+        if (presentDropped) {
+            pacingSkips.emplace_back(now);
+        }
+
+        while (!pacingSkips.empty() && (Timer::deltaMicroseconds(pacingSkips.front(), now) > 1'000'000)) {
+            pacingSkips.erase(pacingSkips.begin());
+        }
+
+        const int64_t sinceChange = Timer::deltaMicroseconds(pacingChanged, now);
+        if ((pacingSkips.size() >= 2) && (pacingMultiple != 1)) {
+            pacingMultiple = pacedMultipleAtMost((pacingMultiple > 0) ? (pacingMultiple - 1) : (targetRate / originalRate));
+
+            if ((pacingRaised != Timestamp()) && (Timer::deltaMicroseconds(pacingRaised, now) < fallBackMicro)) {
+                pacingRetryMicro = std::min(pacingRetryMicro * 2, maxRetryMicro);
+            }
+
+            pacingSkips.clear();
+            pacingChanged = now;
+        }
+        else if ((pacingMultiple > 0) && (sinceChange >= pacingRetryMicro)) {
+            do {
+                pacingMultiple++;
+            } while (isFewer(pacingMultiple) && !isEven(pacingMultiple));
+
+            if (!isFewer(pacingMultiple)) {
+                pacingMultiple = 0;
+            }
+
+            pacingSkips.clear();
+            pacingChanged = now;
+            pacingRaised = now;
+        }
+        else if ((pacingMultiple == 0) && (sinceChange >= maxRetryMicro)) {
+            pacingRetryMicro = minRetryMicro;
+        }
+
+        // The game's rate may have moved since the number was picked, so it is the even number at most that large.
+        ext.sharedResources->pacedRate = (pacingMultiple > 0) ? (pacedMultipleAtMost(pacingMultiple) * originalRate) : 0;
+    }
+
     void PresentQueue::notifyPresentId(const Present &present) {
         {
             std::scoped_lock<std::mutex> cursorLock(presentIdMutex);
@@ -509,6 +604,10 @@ namespace RT64 {
                 if (!presentThreadRunning) {
                     continue;
                 }
+
+#           if defined(__EMSCRIPTEN__)
+                pace(skipPresent && !ext.swapChain->isEmpty());
+#           endif
 
                 if (skipPresent) {
                     skipInterpolation();
