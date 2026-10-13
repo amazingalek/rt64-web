@@ -88,6 +88,8 @@ namespace RT64 {
 
         ~RasterShader();
         void createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling);
+        static void setPipelineState(const ShaderDescription &desc, PipelineCreation &creation);
+        static uint32_t pipelineStateKey(const ShaderDescription &desc);
         static RasterShaderText generateShaderText(const ShaderDescription &desc, bool multisampling);
         static std::unique_ptr<RenderPipeline> createPipeline(const PipelineCreation &c);
         static RenderMultisampling generateMultisamplingPattern(uint32_t sampleCount, bool sampleLocationsSupported);

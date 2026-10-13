@@ -608,9 +608,10 @@ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shader
 # (one per line, five hex words: other mode L and H, color combiner L and H, flags, as its page prints them when opened
 # with ?record-shaders) gets each one specialized here: shader_specializer folds the description into the spec constant
 # SPIR-V with re-spirv, spirv-opt -O cleans up after it, naga turns that into WGSL, and the lot goes into rt64
-# compressed. RasterShaderCache builds them in every browser (startPrebuild()): those above a line reading "background"
-# in the list (all of them without one) before the game gets past its first frame, and the rest behind it. They are
-# made without MSAA, with RasterPS both with dual-source blending (.ps.wgsl) and without (.ps-single.wgsl).
+# compressed. RasterShaderCache builds them in every browser (startPrebuild()), with the game waiting: those above the
+# list's first line reading "section <name>" (all of them without one) before it gets past its first frame, and each
+# section after that when the game first draws with its shaders, a level at a time. They are made without MSAA, with
+# RasterPS both with dual-source blending (.ps.wgsl) and without (.ps-single.wgsl).
 # re-spirv folds the spec constants and drops the branches they decide, but leaves the rest as dxc wrote it for any
 # description: variables kept in memory, copies, branches on what is now constant. spirv-opt (SPIRV-Tools) takes those
 # out. A RasterPS comes out about 45% smaller (the largest 370 KB to 224 KB), descriptions that differ only in what

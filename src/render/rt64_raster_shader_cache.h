@@ -10,6 +10,9 @@
 #include <filesystem>
 #include <fstream>
 #include <list>
+#include <map>
+#include <memory>
+#include <tuple>
 #include <string>
 #include <mutex>
 #include <queue>
@@ -42,7 +45,7 @@ namespace RT64 {
         int32_t descQueueActiveCount = 0;
         std::condition_variable descQueueChanged;
         std::unordered_map<uint64_t, bool> shaderHashes;
-        std::unordered_map<uint64_t, std::unique_ptr<RasterShader>> GPUShaders;
+        std::unordered_map<uint64_t, std::shared_ptr<RasterShader>> GPUShaders;
         std::mutex GPUShadersMutex;
         std::list<std::unique_ptr<CompilationThread>> compilationThreads;
         uint32_t threadCount;
@@ -55,28 +58,36 @@ namespace RT64 {
         bool prebuiltShaders = false;
         bool recordShaders = false;
 
-        // The shaders specialized when the program was built: the game waits past its first frame for the first
-        // prebuildWaitCount, and the rest are built behind it, any a draw asks for first (prebuildUrgent).
+        // The shaders specialized when the program was built, in sections (startPrebuild()): a round builds the
+        // shaders a section needs with the game waiting, and strays are built behind it. The ones the list missed on an
+        // earlier visit are learned (learnPrebuild()), and descriptions that make the same pipeline share one built
+        // for the first of them (prebuildAliases).
         std::list<std::thread> prebuildThreads;
         std::mutex prebuildMutex;
         std::condition_variable prebuildChanged;
+        bool prebuildStop = false;
         uint32_t prebuildCount = 0;
-        uint32_t prebuildDone = 0;
-        uint32_t prebuildNext = 0;
-        uint32_t prebuildWaitCount = 0;
-        uint32_t prebuildWaitDone = 0;
-        std::vector<uint32_t> prebuildOrder;
-        uint64_t prebuildWaitSize = 0;
-        uint64_t prebuildWaitSizeDone = 0;
-        uint64_t prebuildWaitSizeStarted = 0;
-        enum : uint8_t { PrebuildQueued, PrebuildHurried, PrebuildTaken };
+        std::atomic<uint32_t> prebuildBuilt = 0;
+        enum : uint8_t { PrebuildQueued, PrebuildWanted, PrebuildTaken };
         std::vector<uint8_t> prebuildState;
-        std::queue<uint32_t> prebuildUrgent;
+        std::vector<uint32_t> prebuildWanted;
         std::unordered_map<uint64_t, uint32_t> prebuildIndices;
-        std::atomic<bool> prebuildBusy = false;
+        std::vector<uint32_t> prebuildRound;
+        uint32_t prebuildRoundNext = 0;
+        uint32_t prebuildRoundDone = 0;
+        bool prebuildRoundHeld = false;
+        uint64_t prebuildRoundSize = 0;
+        uint64_t prebuildRoundSizeDone = 0;
+        uint64_t prebuildRoundSizeStarted = 0;
+        std::queue<uint32_t> prebuildStrays;
         std::atomic<bool> prebuildDrawn = false;
         std::string prebuildText;
         ElapsedTimer prebuildTimer;
+        std::vector<ShaderDescription> prebuildLearned;
+        std::vector<std::vector<uint32_t>> prebuildLearnedSections;
+        std::vector<std::vector<uint32_t>> prebuildSections;
+        std::vector<std::vector<uint64_t>> prebuildAliases;
+        std::atomic<uint32_t> prebuildSection = 0;
 
         RasterShaderCache(uint32_t threadCount, uint32_t ubershaderThreadCount);
         ~RasterShaderCache();
@@ -84,10 +95,13 @@ namespace RT64 {
         void submit(const ShaderDescription &desc);
         void waitForAll();
         void startPrebuild();
+        void startPrebuildRound(uint32_t section, std::unique_lock<std::mutex> &lock);
         void prebuildLoop(uint32_t thread);
-        void hurryPrebuild(uint64_t shaderHash);
-        void reportPrebuild(uint32_t done, uint64_t sizeDone, uint64_t sizeStarted);
+        void wantPrebuild(uint64_t shaderHash);
+        void reportPrebuild(uint32_t done, uint32_t count, uint64_t sizeDone, uint64_t sizeStarted, uint64_t size);
         void waitForPrebuild();
+        void learnPrebuild();
+        void reportMissed(const ShaderDescription &desc);
         void destroyAll();
         RasterShader *getGPUShader(const ShaderDescription &desc);
         RasterShaderUber *getGPUShaderUber() const;

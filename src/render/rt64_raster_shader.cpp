@@ -327,13 +327,21 @@ namespace RT64 {
 
     void RasterShader::createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling) {
         // Create root signature and PSO.
-        const bool copyMode = (desc.otherMode.cycleType() == G_CYC_COPY);
         PipelineCreation creation;
         creation.device = device;
         creation.pipelineLayout = pipelineLayout;
         creation.vertexShader = vertexShader;
         creation.pixelShader = pixelShader;
         creation.buildInBackground = true;
+        setPipelineState(desc, creation);
+        creation.specConstants = specConstants;
+        creation.multisampling = multisampling;
+        pipeline = createPipeline(creation);
+    }
+
+    // What of a description goes into its pipeline besides its shaders.
+    void RasterShader::setPipelineState(const ShaderDescription &desc, PipelineCreation &creation) {
+        const bool copyMode = (desc.otherMode.cycleType() == G_CYC_COPY);
         creation.alphaBlend = !copyMode && interop::Blender::usesAlphaBlend(desc.otherMode);
         creation.culling = !copyMode && desc.flags.culling;
         creation.zCmp = !copyMode && desc.otherMode.zCmp() && (desc.otherMode.zMode() != ZMODE_DEC);
@@ -341,9 +349,14 @@ namespace RT64 {
         creation.cvgAdd = (desc.otherMode.cvgDst() == CVG_DST_WRAP) || (desc.otherMode.cvgDst() == CVG_DST_SAVE);
         creation.NoN = desc.flags.NoN;
         creation.usesHDR = desc.flags.usesHDR;
-        creation.specConstants = specConstants;
-        creation.multisampling = multisampling;
-        pipeline = createPipeline(creation);
+    }
+
+    // The same for two descriptions whose pipelines differ only in their shaders (setPipelineState()).
+    uint32_t RasterShader::pipelineStateKey(const ShaderDescription &desc) {
+        PipelineCreation creation;
+        setPipelineState(desc, creation);
+        return (creation.alphaBlend ? 0x1U : 0U) | (creation.culling ? 0x2U : 0U) | (creation.zCmp ? 0x4U : 0U) | (creation.zUpd ? 0x8U : 0U) |
+            (creation.cvgAdd ? 0x10U : 0U) | (creation.NoN ? 0x20U : 0U) | (creation.usesHDR ? 0x40U : 0U);
     }
 
     RasterShader::~RasterShader() { }
