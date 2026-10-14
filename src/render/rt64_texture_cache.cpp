@@ -994,7 +994,13 @@ namespace RT64 {
                 uploadQueueChanged.wait(queueLock, [this]() {
                     return !uploadThreadRunning || !uploadQueue.empty() || !resolvedPathQueue.empty() || !streamResultQueue.empty();
                 });
+            }
 
+            // The batch runs from taking the queues until its textures and replacements are in the map, with no reload of
+            // the replacement directories in between (replacementBatchMutex).
+            std::unique_lock batchLock(replacementBatchMutex);
+            {
+                std::unique_lock queueLock(uploadQueueMutex);
                 if (!uploadQueue.empty()) {
                     queueCopy = uploadQueue;
                 }
@@ -1407,6 +1413,9 @@ namespace RT64 {
     }
 
     void TextureCache::clearReplacementDirectories() {
+        // Wait for the upload thread's batch and hold off the next (replacementBatchMutex).
+        std::lock_guard batchLock(replacementBatchMutex);
+
         // Wait for the streaming threads to be finished.
         waitForAllStreamThreads(true);
 
@@ -1460,6 +1469,8 @@ namespace RT64 {
     }
     
     bool TextureCache::loadReplacementDirectories(const std::vector<ReplacementDirectory> &replacementDirectories) {
+        // No upload batch until the new directories are loaded and their replacements queued (replacementBatchMutex).
+        std::lock_guard batchLock(replacementBatchMutex);
         clearReplacementDirectories();
 
         std::unique_lock lock(textureMapMutex);

@@ -208,6 +208,13 @@ namespace RT64 {
         std::mutex uploadQueueMutex;
         std::condition_variable uploadQueueChanged;
         std::condition_variable uploadQueueFinished;
+
+        // Held by the upload thread for a batch and by a reload of the replacement directories. A batch looks up the
+        // replacements it found in the replacement map, waits for the GPU and only then puts them in the texture map:
+        // a reload in between had already queued the ones it found for deletion, and a draw bound them after that
+        // (the hi-res font pack reloaded mid-frame; WebGPU reported a destroyed texture used in a submit). Recursive,
+        // since loadReplacementDirectories holds it across clearReplacementDirectories.
+        std::recursive_mutex replacementBatchMutex;
         std::unique_ptr<std::thread> uploadThread;
         std::atomic<bool> uploadThreadRunning;
         std::stack<StreamDescription> streamDescStack;
