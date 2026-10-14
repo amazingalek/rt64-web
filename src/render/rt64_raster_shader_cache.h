@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <list>
@@ -59,7 +60,8 @@ namespace RT64 {
         bool recordShaders = false;
 
         // The shaders specialized when the program was built, in sections (startPrebuild()): a round builds the
-        // shaders a section needs with the game waiting, and strays are built behind it. The ones the list missed on an
+        // shaders a frame needs with the game waiting, and the rest are built ahead of it (prebuildAhead), the
+        // section the game is in first. The ones the list missed on an
         // earlier visit are learned (learnPrebuild()), and descriptions that make the same pipeline share one built
         // for the first of them (prebuildAliases).
         std::list<std::thread> prebuildThreads;
@@ -68,7 +70,7 @@ namespace RT64 {
         bool prebuildStop = false;
         uint32_t prebuildCount = 0;
         std::atomic<uint32_t> prebuildBuilt = 0;
-        enum : uint8_t { PrebuildQueued, PrebuildWanted, PrebuildTaken };
+        enum : uint8_t { PrebuildQueued, PrebuildWanted, PrebuildSoon, PrebuildTaken };
         std::vector<uint8_t> prebuildState;
         std::vector<uint32_t> prebuildWanted;
         std::unordered_map<uint64_t, uint32_t> prebuildIndices;
@@ -79,7 +81,9 @@ namespace RT64 {
         uint64_t prebuildRoundSize = 0;
         uint64_t prebuildRoundSizeDone = 0;
         uint64_t prebuildRoundSizeStarted = 0;
-        std::queue<uint32_t> prebuildStrays;
+        std::deque<uint32_t> prebuildAhead;
+        std::vector<bool> prebuildBoot;
+        uint32_t prebuildBootThreads = 1;
         std::atomic<bool> prebuildDrawn = false;
         std::string prebuildText;
         ElapsedTimer prebuildTimer;

@@ -198,24 +198,32 @@ namespace RT64 {
     }
 
     // The prebuilt shaders are the ones a game recorded (?record-shaders), specialized when the program was built and
-    // built here with the game waiting, so a weak GPU never draws a frame with the ubershader, which costs several times
-    // what they do per pixel (on a laptop's Intel graphics it was the difference between a frame a second and 60), and
-    // no shader is built in the middle of play. Built from the ubershader's WGSL with the spec constants as overrides, a
+    // built here before the game asks for them or with it waiting, so a weak GPU never draws a frame mostly with the
+    // ubershader, which costs several times what they do per pixel (on a laptop's Intel graphics it was the difference
+    // between a frame a second and 60), and no shader is built in the middle of play where that would stall it. Built from the ubershader's WGSL with the spec constants as overrides, a
     // specialized RasterPS took 6 s cold in Chrome (RTX 2070); specialized beforehand, 1-1.6 s. Chrome keeps them in its
     // WebGPU cache, so a later visit builds them in a fraction of the time (Chrome 154: Rush 2049's 105 in 0.4 s). That
     // cache holds 6 MB a profile, every site's together: past it, the least recently used go.
     //
-    // The list is in sections, a game's screens or levels (rt64_prebuilt_shaders.h), and is built a section at a time,
-    // in rounds, so a game with many levels doesn't keep the player waiting for all of them at the start: GoldenEye's
-    // 455, its menus and every level's start, are 2.5 s for the menus and 6.6 s for Dam, cold (2026-10-13, Chrome 155
-    // headless, RTX 2070, 12 threads). Section 0 is built before the game gets past its first frame. After that, every
+    // The list is in sections, a game's screens or levels (rt64_prebuilt_shaders.h), so a game with many levels doesn't
+    // keep the player waiting for all of them at the start: GoldenEye's 455, its menus and every level's start, are
+    // 2.5 s for the menus and 6.6 s for Dam, cold (2026-10-13, Chrome 155 headless, RTX 2070, 12 threads). Every
     // prebuilt shader a frame asks for that isn't built is wanted (wantPrebuild()), and before the next frame
     // waitForPrebuild() looks for the section that holds the most of them: if that is at least PrebuildSectionMinimum,
-    // the game has gone somewhere new, and the round builds every shader of that section not yet built and every one
-    // wanted, the game waiting. Fewer are strays, a shader one level shares with another that the recording didn't see
-    // there, and one thread builds them behind the game, which draws them with the ubershader meanwhile: a whole
-    // level's wait for one shader would cost more than it saves. Where building a pipeline holds up the device
-    // (Firefox, setup()), the game waits for strays too, since a build behind it would stall its frames anyway.
+    // the game has gone somewhere new and a round builds them, the game waiting. Fewer are strays, a shader one level
+    // shares with another that the recording didn't see there, built behind the game, which draws them with the
+    // ubershader meanwhile: a wait for one shader would cost more than it saves.
+    //
+    // Where pipelines build in the background (Chrome), the game waits only for what a frame wants. One thread builds
+    // the whole list behind the game from its first draw (prebuildAhead), a section at a time in the list's order, the
+    // order the recording reached them in; a round moves the rest of its section to the front, and strays go before
+    // that. Section 0, the boot, has only a few seconds of logos before the game wants the rest, so half the threads
+    // build it; the rest is built one at a time, since each thread takes a core in the browser's GPU process and
+    // levels come minutes apart. So the first frame waits only for its own shaders, the panel the page showed for a whole section before the
+    // game started is mostly gone, and a level reached after a minute of play is usually built before the game gets
+    // there. Where building a pipeline holds up the device (Firefox, setup()), anything built behind the game would
+    // stall its frames, so nothing is: section 0 is built before the game gets past its first frame, a round builds
+    // every shader of its section not yet built, and the game waits for strays too.
     //
     // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so section 0
     // waits for the first frame's draws. A round is built on as many threads as the host has cores (2-16), since the
@@ -303,19 +311,47 @@ namespace RT64 {
 
         prebuildCount = pipelineCount + uint32_t(prebuildLearned.size());
         prebuildState.assign(RT64PrebuiltShaderCount + prebuildLearned.size(), PrebuildQueued);
-        {
-            std::unique_lock<std::mutex> lock(prebuildMutex);
-            startPrebuildRound(0, lock);
+        prebuildBoot.assign(prebuildState.size(), false);
+        if (!prebuildSections.empty()) {
+            for (uint32_t index : prebuildSections[0]) {
+                prebuildBoot[index] = true;
+            }
         }
 
         const uint32_t threads = std::clamp(std::thread::hardware_concurrency(), 2U, 16U);
+        prebuildBootThreads = std::max(threads / 2, 1U);
+        {
+            std::unique_lock<std::mutex> lock(prebuildMutex);
+            if (specializedShaders) {
+                for (const std::vector<uint32_t> &section : prebuildSections) {
+                    prebuildAhead.insert(prebuildAhead.end(), section.begin(), section.end());
+                }
+
+                for (uint32_t i = 0; i < RT64PrebuiltShaderCount; i++) {
+                    if ((primaries[i] == i) && (sectionOf[i] == UINT32_MAX)) {
+                        prebuildAhead.emplace_back(i);
+                    }
+                }
+            }
+            else {
+                startPrebuildRound(0, lock);
+            }
+        }
+
         for (uint32_t t = 0; t < threads; t++) {
             prebuildThreads.emplace_back(&RasterShaderCache::prebuildLoop, this, t);
         }
 
-        printf("RT64: %u prebuilt shaders, %u pipelines, in %u sections, and %u learned; the game waiting for the %u of section %s, built %u at a time once the game draws\n",
-            RT64PrebuiltShaderCount, pipelineCount, RT64PrebuiltShaderSectionCount, uint32_t(prebuildLearned.size()), uint32_t(prebuildRound.size()),
-            RT64PrebuiltShaderSections[0].name, threads);
+        if (specializedShaders) {
+            printf("RT64: %u prebuilt shaders, %u pipelines, in %u sections, and %u learned; built behind the game once it draws (section %s %u at a time, the rest one), the game waiting only for what a frame wants, %u at a time\n",
+                RT64PrebuiltShaderCount, pipelineCount, RT64PrebuiltShaderSectionCount, uint32_t(prebuildLearned.size()), RT64PrebuiltShaderSections[0].name,
+                prebuildBootThreads, threads);
+        }
+        else {
+            printf("RT64: %u prebuilt shaders, %u pipelines, in %u sections, and %u learned; the game waiting for the %u of section %s, built %u at a time once the game draws\n",
+                RT64PrebuiltShaderCount, pipelineCount, RT64PrebuiltShaderSectionCount, uint32_t(prebuildLearned.size()), uint32_t(prebuildRound.size()),
+                RT64PrebuiltShaderSections[0].name, threads);
+        }
 #   endif
     }
 
@@ -380,18 +416,26 @@ namespace RT64 {
 #   endif
     }
 
-    // Starts a round: the shaders of a section (UINT32_MAX for none) not built or being built, and every one wanted, the
-    // game waiting. Called with prebuildMutex held.
+    // Starts a round: every shader wanted, the game waiting, and the rest of a section (UINT32_MAX for none) not built
+    // or being built, next behind the game or, where nothing is built behind it, in the round too. Called with
+    // prebuildMutex held.
     void RasterShaderCache::startPrebuildRound(uint32_t section, std::unique_lock<std::mutex> &lock) {
 #   if defined(RT64_PREBUILT_SHADERS)
         const bool dualSource = device->getCapabilities().dualSourceBlending;
         prebuildRound.clear();
         if (section < RT64PrebuiltShaderSectionCount) {
             prebuildSection = section;
-            for (uint32_t index : prebuildSections[section]) {
-                if (prebuildState[index] != PrebuildTaken) {
-                    prebuildState[index] = PrebuildTaken;
-                    prebuildRound.emplace_back(index);
+            const std::vector<uint32_t> &indices = prebuildSections[section];
+            for (auto it = indices.rbegin(); it != indices.rend(); it++) {
+                if (prebuildState[*it] == PrebuildTaken) {
+                    continue;
+                }
+                else if (specializedShaders) {
+                    prebuildAhead.emplace_front(*it);
+                }
+                else {
+                    prebuildState[*it] = PrebuildTaken;
+                    prebuildRound.emplace_back(*it);
                 }
             }
         }
@@ -437,7 +481,8 @@ namespace RT64 {
 #   endif
     }
 
-    // Every thread builds the round's shaders, and the first one the strays too, between rounds.
+    // Every thread builds the round's shaders, and between rounds the first one builds ahead of the game, with up to
+    // half of them while what is next is section 0's (startPrebuild()).
     void RasterShaderCache::prebuildLoop(uint32_t thread) {
 #   if defined(RT64_PREBUILT_SHADERS)
         Thread::setCurrentThreadName("RT64 Prebuild");
@@ -445,7 +490,8 @@ namespace RT64 {
         std::unique_lock<std::mutex> lock(prebuildMutex);
         while (true) {
             prebuildChanged.wait(lock, [this, thread]() {
-                return prebuildStop || (prebuildRoundNext < prebuildRound.size()) || ((thread == 0) && !prebuildStrays.empty());
+                return prebuildStop || (prebuildRoundNext < prebuildRound.size()) ||
+                    (!prebuildAhead.empty() && ((thread == 0) || ((thread < prebuildBootThreads) && prebuildBoot[prebuildAhead.front()])));
             });
 
             if (prebuildStop) {
@@ -459,8 +505,13 @@ namespace RT64 {
                 prebuildRoundSizeStarted += roundSize(index, dualSource);
             }
             else {
-                index = prebuildStrays.front();
-                prebuildStrays.pop();
+                index = prebuildAhead.front();
+                prebuildAhead.pop_front();
+                if (prebuildState[index] == PrebuildTaken) {
+                    continue;
+                }
+
+                prebuildState[index] = PrebuildTaken;
             }
 
             lock.unlock();
@@ -501,9 +552,6 @@ namespace RT64 {
                     prebuildRoundHeld = false;
                     printf("RT64: %u prebuilt shaders built in %.1f s, the game waiting\n", uint32_t(prebuildRound.size()), prebuildTimer.elapsedSeconds());
                 }
-            }
-            else {
-                printf("RT64: a prebuilt shader no section built so far, built behind the game\n");
             }
 
             if (++prebuildBuilt == prebuildCount) {
@@ -555,8 +603,8 @@ namespace RT64 {
             else {
                 for (uint32_t index : prebuildWanted) {
                     if (prebuildState[index] == PrebuildWanted) {
-                        prebuildState[index] = PrebuildTaken;
-                        prebuildStrays.push(index);
+                        prebuildState[index] = PrebuildSoon;
+                        prebuildAhead.emplace_front(index);
                     }
                 }
 
