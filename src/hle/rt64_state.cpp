@@ -7,6 +7,11 @@
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
+#include <cstring>
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#   include <intrin.h>
+#endif
 
 #include "im3d/im3d.h"
 #include "im3d/im3d_math.h"
@@ -85,6 +90,7 @@ namespace RT64 {
         displayListCounter = 0;
         rdramCheckPending = true;
         pendingRAMCopies.clear();
+        pendingRAMImages.clear();
         workloadCounter = 0;
         lastScreenHash = 0;
         lastScreenFactorCounter = 0;
@@ -785,6 +791,35 @@ namespace RT64 {
         }
     }
     
+    // Writes a word of RDRAM only if it still holds what it's expected to, in one step, so that a word the CPU writes
+    // at the same time keeps the CPU's value.
+    static bool replaceRDRAMWord(uint32_t *word, uint32_t expected, uint32_t desired) {
+#   if defined(_MSC_VER) && !defined(__clang__)
+        return _InterlockedCompareExchange(reinterpret_cast<volatile long *>(word), long(desired), long(expected)) == long(expected);
+#   else
+        return __atomic_compare_exchange_n(word, &expected, desired, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+#   endif
+    }
+
+    void State::addPendingRAMCopy(Framebuffer *fb, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd) {
+        pendingRAMCopies.push_back({ fb->addressStart, rowWidth, rowStart, rowEnd });
+
+        // The list hasn't completed, so the game hasn't touched the framebuffer's memory since it was drawn: this is
+        // what the copy must find there when it lands.
+        PendingRAMImage &image = pendingRAMImages[fb->addressStart];
+        if (image.words.empty()) {
+            image.start = fb->addressStart & ~3U;
+        }
+
+        const uint32_t end = fb->addressStart + std::max(fb->RAMBytes, rowEnd * fb->imageRowBytes(rowWidth));
+        const size_t wordCount = (end - image.start + 3) / 4;
+        const size_t oldWordCount = image.words.size();
+        if (wordCount > oldWordCount) {
+            image.words.resize(wordCount);
+            memcpy(&image.words[oldWordCount], &RDRAM[image.start + oldWordCount * 4], (wordCount - oldWordCount) * 4);
+        }
+    }
+
     void State::landRAMCopies(bool onlyIfReady) {
         if (pendingRAMCopies.empty()) {
             return;
@@ -801,45 +836,73 @@ namespace RT64 {
 
         ext.framebufferGraphicsWorker->wait();
 
-        // RDRAM still holds what it held when the list ended (its hash then is the framebuffer's), unless the CPU wrote
-        // to it since: then the CPU's write stays, and the next list sees it as a change, as it would any other.
-        thread_local std::vector<std::pair<Framebuffer *, bool>> landedFbs;
-        landedFbs.clear();
+        // The game has had the list's completion and runs meanwhile, so it may have reused a framebuffer's memory. Each
+        // frame is converted outside RDRAM and written in a word at a time, only where RDRAM still holds what it held
+        // when the list ended: a framebuffer the CPU wrote to before its copy lands keeps all of what it holds, and one
+        // the CPU writes to while its copy lands keeps every word the CPU wrote, the copy stopping there. Either way
+        // the next list sees the framebuffer as changed, as it would any other change the CPU made. A word the CPU
+        // wrote with the value it already held can't be told from one left alone, and gets the frame: a game whose
+        // reuse of a framebuffer's memory relies on that (zeroes written over zeroes) can't take the copy late.
+        auto reportCpuWrite = [this](uint32_t address, bool whileLanding) {
+            lateRAMCopyCpuWrites++;
+            const uint32_t n = lateRAMCopyCpuWrites;
+            if ((n <= 16) || ((n & (n - 1)) == 0)) {
+                fprintf(stderr, "RT64: the CPU wrote to the framebuffer at 0x%08X %s its frame was copied to RAM a list late; it keeps what the CPU wrote (%u times so far)\n",
+                    address, whileLanding ? "while" : "before", n);
+            }
+        };
+
+        thread_local std::vector<uint32_t> landedWords;
         for (const PendingRAMCopy &copy : pendingRAMCopies) {
             Framebuffer *fb = framebufferManager.find(copy.address);
-            if ((fb == nullptr) || (fb->nativeTarget.writeBufferHistoryIndex >= fb->nativeTarget.writeBufferHistoryCount)) {
+            auto imageIt = pendingRAMImages.find(copy.address);
+            if ((fb == nullptr) || (imageIt == pendingRAMImages.end()) || (fb->nativeTarget.writeBufferHistoryIndex >= fb->nativeTarget.writeBufferHistoryCount)) {
                 continue;
             }
 
-            auto it = std::find_if(landedFbs.begin(), landedFbs.end(), [fb](const std::pair<Framebuffer *, bool> &p) { return p.first == fb; });
-            if (it == landedFbs.end()) {
-                const bool cpuWrote = (XXH3_64bits(&RDRAM[fb->addressStart], fb->RAMBytes) != fb->RAMHash);
-                if (cpuWrote) {
-                    static bool reported = false;
-                    if (!reported) {
-                        fprintf(stderr, "RT64: the CPU wrote to the framebuffer at 0x%08X before its frame was copied to RAM a list late; it keeps what the CPU wrote\n", fb->addressStart);
-                        reported = true;
-                    }
+            PendingRAMImage &image = imageIt->second;
+            uint32_t *ramWords = reinterpret_cast<uint32_t *>(&RDRAM[image.start]);
+            if (!image.checked) {
+                image.checked = true;
+                image.cpuWrote = (memcmp(ramWords, image.words.data(), image.words.size() * 4) != 0);
+                if (image.cpuWrote) {
+                    reportCpuWrite(copy.address, false);
+                }
+            }
+
+            if (image.cpuWrote) {
+                fb->nativeTarget.writeBufferHistoryIndex++;
+                continue;
+            }
+
+            landedWords = image.words;
+            fb->copyNativeToRAM(reinterpret_cast<uint8_t *>(landedWords.data()) + (fb->addressStart - image.start), copy.rowWidth, copy.rowStart, copy.rowEnd);
+            for (size_t i = 0; i < landedWords.size(); i++) {
+                if (landedWords[i] == image.words[i]) {
+                    continue;
                 }
 
-                it = landedFbs.emplace(landedFbs.end(), fb, !cpuWrote);
-            }
+                if (!replaceRDRAMWord(&ramWords[i], image.words[i], landedWords[i])) {
+                    image.cpuWrote = true;
+                    reportCpuWrite(copy.address, true);
+                    break;
+                }
 
-            if (it->second) {
-                fb->copyNativeToRAM(&RDRAM[fb->addressStart], copy.rowWidth, copy.rowStart, copy.rowEnd);
-            }
-            else {
-                fb->nativeTarget.writeBufferHistoryIndex++;
+                image.words[i] = landedWords[i];
             }
         }
 
-        for (const auto &landedFb : landedFbs) {
-            if (landedFb.second) {
-                landedFb.first->RAMHash = XXH3_64bits(&RDRAM[landedFb.first->addressStart], landedFb.first->RAMBytes);
+        // A framebuffer whose copies all landed holds them, which a later write by the CPU changes. One the CPU wrote to
+        // keeps its hash from the end of the list, so the next list reads it back.
+        for (const auto &it : pendingRAMImages) {
+            Framebuffer *fb = framebufferManager.find(it.first);
+            if ((fb != nullptr) && it.second.checked && !it.second.cpuWrote) {
+                fb->RAMHash = XXH3_64bits(reinterpret_cast<const uint8_t *>(it.second.words.data()) + (it.first - it.second.start), fb->RAMBytes);
             }
         }
 
         pendingRAMCopies.clear();
+        pendingRAMImages.clear();
     }
 
     void State::listProcessBegin() {
@@ -1546,7 +1609,7 @@ namespace RT64 {
 
                 auto copyToRAM = [&](Framebuffer *fb, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd) {
                     if (copyLate) {
-                        pendingRAMCopies.push_back({ fb->addressStart, rowWidth, rowStart, rowEnd });
+                        addPendingRAMCopy(fb, rowWidth, rowStart, rowEnd);
                     }
                     else {
                         fb->copyNativeToRAM(&RDRAM[fb->addressStart], rowWidth, rowStart, rowEnd);

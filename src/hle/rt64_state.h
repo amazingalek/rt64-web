@@ -100,7 +100,19 @@ namespace RT64 {
             uint32_t rowEnd;
         };
 
+        // For each framebuffer with a pending copy, by its address: the words of RDRAM it covers (from a word-aligned
+        // start) as they were when the list ended, with each copy written in as it lands, and whether the CPU has
+        // written to them since.
+        struct PendingRAMImage {
+            uint32_t start = 0;
+            std::vector<uint32_t> words;
+            bool checked = false;
+            bool cpuWrote = false;
+        };
+
         std::vector<PendingRAMCopy> pendingRAMCopies;
+        std::unordered_map<uint32_t, PendingRAMImage> pendingRAMImages;
+        uint32_t lateRAMCopyCpuWrites = 0;
         GameConfiguration gameConfig;
         uint32_t displayListAddress;
         uint64_t displayListCounter;
@@ -154,6 +166,7 @@ namespace RT64 {
         void flush();
         void submitFramebufferPair(FramebufferPair::FlushReason flushReason);
         void checkRDRAM();
+        void addPendingRAMCopy(Framebuffer *fb, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd);
         void landRAMCopies(bool onlyIfReady);
         void fullSync();
         void fullSyncFramebufferPairTiles(Workload &workload, FramebufferPair &fbPair, uint32_t &loadOpCursor, uint32_t &rdpTileCursor);
