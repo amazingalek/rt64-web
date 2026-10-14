@@ -27,14 +27,17 @@
 // Where a tile's texture is. With descriptor indexing, textureIndex is the texture cache index of the tile's texture
 // (set 1) or of its TMEM (set 2). Without it (PER_DRAW_TEXTURES), the renderer binds each draw's textures in a set of
 // their own, one slot per tile of the draw, so a texture is picked by the tile's number within its draw, which
-// drawGPUTile() puts in the bits of textureIndex above the cache index. The cache index still finds the TMEM, in
-// gTMEMPool. A switch picks the slot, since core WebGPU can't index bindings.
+// drawGPUTile() puts in drawSlot. The cache index still finds the TMEM, in gTMEMPool. A switch picks the slot, since
+// core WebGPU can't index bindings. The slot is never read from a buffer, so a specialized shader that knows the
+// tile's number (one without mip LOD) knows its slot, and spirv-opt keeps only that case. In the bits of textureIndex,
+// every texture read stayed a switch of 8 reads: a prebuilt pixel shader without LOD is a third of the WGSL without
+// it, and in Firefox 158, which builds pipelines one at a time, Majora's Mask's Clock Town took 9.3-10.4 s against
+// 15.1-18.2 s and Rush 2049's boot 11.9-12.6 s against 13.6-14.6 s (RTX 2070). Shaders with LOD keep the switch.
 #ifdef PER_DRAW_TEXTURES
-#define TILE_SLOT_SHIFT 28
-#define tileTMEM(gpuTile) (((gpuTile).textureIndex & ((1U << TILE_SLOT_SHIFT) - 1U)) * RDP_TMEM_BYTES)
+#define tileTMEM(gpuTile) ((gpuTile).textureIndex * RDP_TMEM_BYTES)
 
 #define TILE_TEXTURE_SWITCH(gpuTile, TEXTURE_CALL) \
-    switch ((gpuTile).textureIndex >> TILE_SLOT_SHIFT) { \
+    switch ((gpuTile).drawSlot) { \
     case 0: return TEXTURE_CALL(gTileTexture0); \
     case 1: return TEXTURE_CALL(gTileTexture1); \
     case 2: return TEXTURE_CALL(gTileTexture2); \
@@ -47,7 +50,7 @@
 
 // The same with the slot's sampler (gTileSampler0 to 7), for a linear sample.
 #define TILE_TEXTURE_SAMPLER_SWITCH(gpuTile, TEXTURE_SAMPLER_CALL) \
-    switch ((gpuTile).textureIndex >> TILE_SLOT_SHIFT) { \
+    switch ((gpuTile).drawSlot) { \
     case 0: return TEXTURE_SAMPLER_CALL(gTileTexture0, gTileSampler0); \
     case 1: return TEXTURE_SAMPLER_CALL(gTileTexture1, gTileSampler1); \
     case 2: return TEXTURE_SAMPLER_CALL(gTileTexture2, gTileSampler2); \
@@ -66,7 +69,7 @@
 GPUTile drawGPUTile(uint rdpTileIndex, uint tileIndex) {
     GPUTile gpuTile = GPUTiles[rdpTileIndex + tileIndex];
 #ifdef PER_DRAW_TEXTURES
-    gpuTile.textureIndex |= tileIndex << TILE_SLOT_SHIFT;
+    gpuTile.drawSlot = tileIndex;
 #endif
     return gpuTile;
 }

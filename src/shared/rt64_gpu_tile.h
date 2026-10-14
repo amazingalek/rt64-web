@@ -60,7 +60,10 @@ namespace interop {
         float3 textureDimensions;
         uint textureIndex;
         GPUTileFlags flags;
-        uint pad[3];
+        // Set by the shader in its copy, never on the CPU: the tile's slot in its draw's texture set (PER_DRAW_TEXTURES,
+        // TextureSampler.hlsli).
+        uint drawSlot;
+        uint pad[2];
     };
 #ifdef HLSL_CPU
     static_assert(sizeof(GPUTile) == 64, "GPUTile must keep the layout WGSL gives it.");
