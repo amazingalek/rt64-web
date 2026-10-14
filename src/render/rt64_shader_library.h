@@ -13,15 +13,6 @@ namespace RT64 {
     };
 
     struct ShaderLibrary {
-        // The swap chain's format. A browser's canvas takes rgba8unorm or bgra8unorm, and Firefox (157 on Windows 10)
-        // keeps every frame a bgra8unorm canvas presented in video memory, about 13 MB a frame at 1080p, until the GPU
-        // runs out and the frame rate collapses. With rgba8unorm it frees them.
-#if defined(__EMSCRIPTEN__)
-        static constexpr RenderFormat SwapChainFormat = RenderFormat::R8G8B8A8_UNORM;
-#else
-        static constexpr RenderFormat SwapChainFormat = RenderFormat::B8G8R8A8_UNORM;
-#endif
-
         SamplerLibrary samplerLibrary;
         bool usesHDR = false;
         bool usesHardwareResolve = false;
