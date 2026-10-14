@@ -124,7 +124,18 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         screenPos.x += FbParams.horizontalMisalignment;
         lowResUV -= fmod(screenPos.xy, FbParams.resolutionScale.yy) * float2(ddxVertexUV.x, ddyVertexUV.y);
     }
-    
+
+    // A high resolution tile is sampled at vertexUV, which on a rect drawn backwards (a negative dsdx or dtdy) runs
+    // one native pixel behind the texel the low resolution UV picks, so its last row or column samples outside the
+    // tile. With FLIPPED_RECT_HIGH_RES (RT64_FLIPPED_RECT_HIGH_RES, on with WGSL) each native pixel starts at the texel
+    // it shows instead.
+    float2 highResUV = vertexUV;
+#if defined(FLIPPED_RECT_HIGH_RES)
+    if (renderFlagRect(rp.flags) && !renderFlagUpscale2D(rp.flags)) {
+        highResUV -= min(float2(ddxVertexUV.x, ddyVertexUV.y), 0.0f) * FbParams.resolutionScale.yy;
+    }
+#endif
+
     int tileIndex0 = 0;
     int tileIndex1 = 1;
     float lodFraction;
@@ -147,7 +158,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         }
         
         const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[gConstants.renderIndex].rdpTileIndex, tileIndex0);
-        const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
+        const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? highResUV : lowResUV;
         texVal0 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, false);
     }
     
@@ -163,7 +174,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         }
         
         const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[gConstants.renderIndex].rdpTileIndex, tileIndex);
-        const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? vertexUV : lowResUV;
+        const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? highResUV : lowResUV;
         const uint nativeSampler = renderFlagNativeSampler1(rp.flags);
         texVal1 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, oneCycleHardwareBug);
     }

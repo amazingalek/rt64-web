@@ -15,6 +15,7 @@ option(RT64_WGSL "Compile the shaders to WGSL for WebGPU, in place of DXIL, SPIR
 option(RT64_SDL_WINDOW_VULKAN "Build RT64 to expect an SDL Window outside of Windows" OFF)
 option(RT64_PER_DRAW_TEXTURES "Bind textures per draw on every device, as devices without descriptor indexing (WebGPU) need; to test that path" OFF)
 option(RT64_PACKED_RSP_INPUTS "Gather the RSP compute shaders' inputs into one buffer on every device, as WebGPU's 8 storage buffers per stage need; to test that path" OFF)
+option(RT64_FLIPPED_RECT_HIGH_RES "Sample a high-res replacement on a rect drawn backwards on the texel the RDP picks, not one native pixel behind it (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -140,6 +141,11 @@ endif()
 if (RT64_PACKED_RSP_INPUTS OR RT64_WGSL)
     set (RT64_PACKED_RSP_INPUTS ON)
     list(APPEND DXC_COMMON_OPTS "-D" "PACKED_RSP_INPUTS")
+endif()
+# A high-res replacement on a rect drawn backwards (a negative dsdx or dtdy) sampled on the texel the RDP picks
+# (RasterPS.hlsl): a fix for any game with a texture pack, behind an option since it changes what upstream draws.
+if (RT64_FLIPPED_RECT_HIGH_RES OR RT64_WGSL)
+    list(APPEND DXC_COMMON_OPTS "-D" "FLIPPED_RECT_HIGH_RES")
 endif()
 set (DXC_DXIL_OPTS "-Wno-ignored-attributes")
 set (DXC_SPV_OPTS "-spirv" "-fspv-target-env=vulkan1.0" "-fvk-use-dx-layout")
