@@ -33,6 +33,7 @@ namespace RT64 {
         hlslpp::float2 resolutionScale = 1.0f;
         uint32_t targetRate = 0;
         std::atomic<uint32_t> pacedRate = 0;
+        std::atomic<uint32_t> prebuildWaits = 0;
         UserConfiguration userConfig;
         EnhancementConfiguration enhancementConfig;
         EmulatorConfiguration emulatorConfig;

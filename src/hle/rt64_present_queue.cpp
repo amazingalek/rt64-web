@@ -436,8 +436,11 @@ namespace RT64 {
     // after, and the GPU is busy for a moment with what it was given, so drops are counted over a whole 2 s of presents,
     // never fewer: judged on the first few dozen after a wait, or after a try of the number above (which starts the count
     // again), 4 dropped were enough, and Donkey Kong 64 in Firefox went to 30 presents a second right after its boot's
-    // wait and stayed there for 70 s, each try falling straight back. A game at about the display's rate (a launcher's
-    // 60 on a 59-61 Hz display) has nothing to be paced to, and its drops while a page loads aren't counted either.
+    // wait and stayed there for 70 s, each try falling straight back. And the count starts again a second after any such
+    // wait ends: a wait shorter than 2 s left presents from before it in the count beside the burst after it, and
+    // Banjo-Kazooie in Chrome went to 30 a second 0.4 s after its 1.5 s wait, for 10 s. A game at about the display's
+    // rate (a launcher's 60 on a 59-61 Hz display) has nothing to be paced to, and its drops while a page loads aren't
+    // counted either.
     void PresentQueue::pace(bool presentDropped) {
         const uint32_t targetRate = ext.sharedResources->targetRate;
         const uint32_t originalRate = ext.sharedResources->viOriginalRate;
@@ -487,6 +490,18 @@ namespace RT64 {
         if (pacingRetryMicro == 0) {
             pacingRetryMicro = minRetryMicro;
             pacingChanged = now;
+        }
+
+        const uint32_t prebuildWaits = ext.sharedResources->prebuildWaits;
+        if (prebuildWaits != pacingPrebuildWaits) {
+            pacingPrebuildWaits = prebuildWaits;
+            pacingPrebuildWaited = now;
+        }
+
+        if ((pacingPrebuildWaited != Timestamp()) && (Timer::deltaMicroseconds(pacingPrebuildWaited, now) < 1'000'000)) {
+            pacingPresents.clear();
+            pacingDropped = 0;
+            return;
         }
 
         pacingPresents.emplace_back(now, presentDropped);

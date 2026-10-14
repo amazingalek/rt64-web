@@ -917,7 +917,10 @@ namespace RT64 {
 
             if (processCursor >= 0) {
                 // The game waits for the prebuilt shaders (RasterShaderCache::startPrebuild()) here, past its first frame.
-                ext.rasterShaderCache->waitForPrebuild();
+                // The present queue counts the waits, to leave the burst of presents after one out of its pacing.
+                if (ext.rasterShaderCache->waitForPrebuild()) {
+                    ext.sharedResources->prebuildWaits++;
+                }
 
                 std::unique_lock<std::mutex> threadLock(threadMutex);
                 Workload &workload = workloads[processCursor];

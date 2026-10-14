@@ -565,16 +565,18 @@ namespace RT64 {
     }
 
     // Before each frame: holds it until the round is built, and then, if the last frame wanted prebuilt shaders,
-    // decides what builds them (startPrebuild() says how).
-    void RasterShaderCache::waitForPrebuild() {
+    // decides what builds them (startPrebuild() says how). Returns whether the game was held.
+    bool RasterShaderCache::waitForPrebuild() {
+        bool held = false;
 #   if defined(RT64_PREBUILT_SHADERS)
         // Until something has drawn, no WebGPU layout has been resolved for the prebuilt shaders to be built for.
         if (!prebuildDrawn) {
-            return;
+            return false;
         }
 
         std::unique_lock<std::mutex> lock(prebuildMutex);
         while (true) {
+            held = held || prebuildRoundHeld;
             prebuildChanged.wait(lock, [this]() { return !prebuildRoundHeld; });
             if (prebuildWanted.empty()) {
                 break;
@@ -613,6 +615,7 @@ namespace RT64 {
             }
         }
 #   endif
+        return held;
     }
 
     // A draw asked for a prebuilt shader that isn't built yet.
