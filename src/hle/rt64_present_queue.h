@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <deque>
+
 #include "common/rt64_profiling_timer.h"
 #include "gui/rt64_inspector.h"
 #include "render/rt64_vi_renderer.h"
@@ -58,7 +60,8 @@ namespace RT64 {
         VIHistory viHistory;
         bool presentWaitEnabled = false;
         uint32_t pacingMultiple = 0;
-        std::vector<Timestamp> pacingSkips;
+        std::deque<std::pair<Timestamp, bool>> pacingPresents;
+        uint32_t pacingDropped = 0;
         Timestamp pacingChanged;
         Timestamp pacingRaised;
         int64_t pacingRetryMicro = 0;

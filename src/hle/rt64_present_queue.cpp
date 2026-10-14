@@ -425,17 +425,21 @@ namespace RT64 {
     // Frames interpolated to the display's rate are drawn for evenly spaced moments, so motion looks even only if each
     // is presented. When the GPU can't keep up, a game frame whose present is still waiting behind the next one is
     // dropped whole, and the rest get one, two or three presents: some frames shown three times, some never. That
-    // happens in Chrome and Firefox alike on a laptop's integrated graphics. So while frames are being dropped (2 in a
-    // second), each game frame gets fewer presents, a number that divides the display's rate evenly (a 30 fps game on
-    // a 60 Hz display: 1, at 30 a second), and a while later it tries the number above again: after 10 s, twice as long
-    // each time it falls straight back (2 min at most). The number is kept, not the rate, since a game's own rate moves
-    // (Banjo-Kazooie's between 20 and 30).
+    // happens in Chrome and Firefox alike on a laptop's integrated graphics. So while frames are being dropped (one
+    // present in ten or more over 2 s, 4 at least), each game frame gets fewer presents, a number that divides the
+    // display's rate evenly (a 30 fps game on a 60 Hz display: 1, at 30 a second), and a while later it tries the
+    // number above again: after 10 s, twice as long each time it falls straight back (2 min at most). The number is
+    // kept, not the rate, since a game's own rate moves (Banjo-Kazooie's between 20 and 30). A present dropped now and
+    // then is not the GPU falling behind: a pipeline built behind the game (Chrome) drops one every second or two, and
+    // counting those (2 in a second) held GoldenEye's cast credits, 8-12 game frames a second, at one present a frame
+    // for 10-30 s.
     void PresentQueue::pace(bool presentDropped) {
         const uint32_t targetRate = ext.sharedResources->targetRate;
         const uint32_t originalRate = ext.sharedResources->viOriginalRate;
         if ((targetRate == 0) || (originalRate == 0) || (targetRate <= originalRate)) {
             pacingMultiple = 0;
-            pacingSkips.clear();
+            pacingPresents.clear();
+            pacingDropped = 0;
             ext.sharedResources->pacedRate = 0;
             return;
         }
@@ -471,23 +475,24 @@ namespace RT64 {
             pacingChanged = now;
         }
 
-        if (presentDropped) {
-            pacingSkips.emplace_back(now);
+        pacingPresents.emplace_back(now, presentDropped);
+        pacingDropped += presentDropped ? 1 : 0;
+        while (Timer::deltaMicroseconds(pacingPresents.front().first, now) > 2'000'000) {
+            pacingDropped -= pacingPresents.front().second ? 1 : 0;
+            pacingPresents.pop_front();
         }
 
-        while (!pacingSkips.empty() && (Timer::deltaMicroseconds(pacingSkips.front(), now) > 1'000'000)) {
-            pacingSkips.erase(pacingSkips.begin());
-        }
-
+        const bool fallingBehind = (pacingDropped >= 4) && ((pacingDropped * 10) >= pacingPresents.size());
         const int64_t sinceChange = Timer::deltaMicroseconds(pacingChanged, now);
-        if ((pacingSkips.size() >= 2) && (pacingMultiple != 1)) {
+        if (fallingBehind && (pacingMultiple != 1)) {
             pacingMultiple = pacedMultipleAtMost((pacingMultiple > 0) ? (pacingMultiple - 1) : (targetRate / originalRate));
 
             if ((pacingRaised != Timestamp()) && (Timer::deltaMicroseconds(pacingRaised, now) < fallBackMicro)) {
                 pacingRetryMicro = std::min(pacingRetryMicro * 2, maxRetryMicro);
             }
 
-            pacingSkips.clear();
+            pacingPresents.clear();
+            pacingDropped = 0;
             pacingChanged = now;
         }
         else if ((pacingMultiple > 0) && (sinceChange >= pacingRetryMicro)) {
@@ -499,7 +504,8 @@ namespace RT64 {
                 pacingMultiple = 0;
             }
 
-            pacingSkips.clear();
+            pacingPresents.clear();
+            pacingDropped = 0;
             pacingChanged = now;
             pacingRaised = now;
         }
@@ -508,7 +514,13 @@ namespace RT64 {
         }
 
         // The game's rate may have moved since the number was picked, so it is the even number at most that large.
-        ext.sharedResources->pacedRate = (pacingMultiple > 0) ? (pacedMultipleAtMost(pacingMultiple) * originalRate) : 0;
+        const uint32_t pacedRate = (pacingMultiple > 0) ? (pacedMultipleAtMost(pacingMultiple) * originalRate) : 0;
+        if ((pacedRate == 0) != (ext.sharedResources->pacedRate == 0)) {
+            const char *what = (pacedRate > 0) ? "paced to the game's frames while the GPU falls behind" : "back at the display's rate";
+            printf("RT64: presents %s (the game at %u frames a second)\n", what, originalRate);
+        }
+
+        ext.sharedResources->pacedRate = pacedRate;
     }
 
     void PresentQueue::notifyPresentId(const Present &present) {
