@@ -2,6 +2,8 @@
 // RT64
 //
 
+#include <algorithm>
+
 #include "common/rt64_math.h"
 
 #include "rt64_game_frame.h"
@@ -166,6 +168,55 @@ namespace RT64 {
 
     bool operator<(const IndexPair &lhs, const IndexPair &rhs) {
         return (lhs.first < rhs.first) || ((lhs.first == rhs.first) && lhs.second < rhs.second);
+    }
+
+    // Sorts the pairs in the order operator< gives and drops the repeats. Each pair becomes a 64-bit key that sorts the same way,
+    // and the keys are sorted a byte at a time, skipping the bytes no key uses: the indices are small, so that is a few passes.
+    static void sortUniqueIndexPairs(std::vector<IndexPair> &pairs) {
+        thread_local std::vector<uint64_t> keys;
+        thread_local std::vector<uint64_t> sortedKeys;
+        const size_t count = pairs.size();
+        keys.resize(count);
+        sortedKeys.resize(count);
+        uint64_t keyBits = 0;
+        for (size_t i = 0; i < count; i++) {
+            keys[i] = (uint64_t(pairs[i].first) << 32) | pairs[i].second;
+            keyBits |= keys[i];
+        }
+
+        for (uint32_t shift = 0; shift < 64; shift += 8) {
+            // A byte that is zero in every key leaves the order as it is.
+            if (((keyBits >> shift) & 0xFFU) == 0) {
+                continue;
+            }
+
+            uint32_t offsets[256] = {};
+            for (size_t i = 0; i < count; i++) {
+                offsets[(keys[i] >> shift) & 0xFFU]++;
+            }
+
+            uint32_t offset = 0;
+            for (uint32_t &o : offsets) {
+                const uint32_t bucketCount = o;
+                o = offset;
+                offset += bucketCount;
+            }
+
+            for (size_t i = 0; i < count; i++) {
+                sortedKeys[offsets[(keys[i] >> shift) & 0xFFU]++] = keys[i];
+            }
+
+            keys.swap(sortedKeys);
+        }
+
+        size_t uniqueCount = 0;
+        for (size_t i = 0; i < count; i++) {
+            if ((i == 0) || (keys[i] != keys[i - 1])) {
+                pairs[uniqueCount++] = IndexPair(uint32_t(keys[i] >> 32), uint32_t(keys[i]));
+            }
+        }
+
+        pairs.resize(uniqueCount);
     }
 
     struct MatchCandidate {
@@ -403,8 +454,10 @@ namespace RT64 {
             return;
         }
 
-        thread_local std::multimap<uint64_t, GameCallMap> curCallHashMap;
-        thread_local std::multimap<uint64_t, GameCallMap> prevCallHashMap;
+        // Sorted vectors rather than multimaps and sets: they are rebuilt for every scene of every frame, and the
+        // node allocations were most of this thread's time. Sorted the same way, so they are visited in the same order.
+        thread_local std::vector<std::pair<uint64_t, GameCallMap>> curCallHashMap;
+        thread_local std::vector<std::pair<uint64_t, GameCallMap>> prevCallHashMap;
         curCallHashMap.clear();
         prevCallHashMap.clear();
 
@@ -509,17 +562,24 @@ namespace RT64 {
             buildCallHashMap(p, prevWorkload, prevProj, prevCallHashMap);
         }
 
+        // As a multimap orders them: by hash, and calls with the same hash in the order they were added.
+        auto byHash = [](const std::pair<uint64_t, GameCallMap> &lhs, const std::pair<uint64_t, GameCallMap> &rhs) {
+            return lhs.first < rhs.first;
+        };
+        std::stable_sort(curCallHashMap.begin(), curCallHashMap.end(), byHash);
+        std::stable_sort(prevCallHashMap.begin(), prevCallHashMap.end(), byHash);
+
         // FIXME: Transform set needs to be done per unique workload detected.
-        thread_local std::set<IndexPair> transformCheckSet;
-        thread_local std::set<IndexPair> tileCheckSet;
-        thread_local std::set<IndexPair> lookAtCheckSet;
+        thread_local std::vector<IndexPair> transformCheckSet;
+        thread_local std::vector<IndexPair> tileCheckSet;
+        thread_local std::vector<IndexPair> lookAtCheckSet;
         transformCheckSet.clear();
         tileCheckSet.clear();
         lookAtCheckSet.clear();
 
         // Traverse the map and fill the set with all the combinations of transforms to check.
         for (std::pair<uint64_t, GameCallMap> curIt : curCallHashMap) {
-            auto prevRange = prevCallHashMap.equal_range(curIt.first);
+            auto prevRange = std::equal_range(prevCallHashMap.begin(), prevCallHashMap.end(), std::pair<uint64_t, GameCallMap>{ curIt.first, {} }, byHash);
             for (auto prevIt = prevRange.first; prevIt != prevRange.second; prevIt++) {
                 const GameIndices::Projection &curProjIndices = curScene.projections[curIt.second.sceneProjIndex];
                 const Workload &curWorkload = workloadQueue.workloads[curProjIndices.workloadIndex];
@@ -542,7 +602,7 @@ namespace RT64 {
                         const uint32_t prevGroupIndex = prevWorkload.drawData.worldTransformGroups[prevWorldMatrix];
                         const TransformGroup &prevGroup = prevWorkload.drawData.transformGroups[prevGroupIndex];
                         if ((curGroup.matrixId == prevGroup.matrixId) && ((curGroup.matrixId == G_EX_ID_AUTO) || ((curGroup.matrixId != G_EX_ID_IGNORE) && (curGroup.ordering == G_EX_ORDER_AUTO)))) {
-                            transformCheckSet.emplace(curWorldMatrix, prevWorldMatrix);
+                            transformCheckSet.emplace_back(curWorldMatrix, prevWorldMatrix);
                         }
                     }
                 }
@@ -556,7 +616,7 @@ namespace RT64 {
                             continue;
                         }
 
-                        tileCheckSet.emplace(curCall.callDesc.tileIndex + t, prevCall.callDesc.tileIndex + t);
+                        tileCheckSet.emplace_back(curCall.callDesc.tileIndex + t, prevCall.callDesc.tileIndex + t);
                     }
                 }
 
@@ -569,9 +629,14 @@ namespace RT64 {
                     const uint32_t prevVertexIndex = prevWorkload.drawData.faceIndices[prevCall.meshDesc.faceIndicesStart];
                     const uint32_t curLookAtIndex = curWorkload.drawData.lookAtIndices[curVertexIndex] >> RSP_LOOKAT_INDEX_SHIFT;
                     const uint32_t prevLookAtIndex = prevWorkload.drawData.lookAtIndices[prevVertexIndex] >> RSP_LOOKAT_INDEX_SHIFT;
-                    lookAtCheckSet.emplace(curLookAtIndex, prevLookAtIndex);
+                    lookAtCheckSet.emplace_back(curLookAtIndex, prevLookAtIndex);
                 }
             }
+        }
+
+        // Sorted and without repeats, as the sets were.
+        for (std::vector<IndexPair> *checkSet : { &transformCheckSet, &tileCheckSet, &lookAtCheckSet }) {
+            sortUniqueIndexPairs(*checkSet);
         }
 
         // Compute all the differences between transforms and insert them into a vector that will be sorted according to the differences.
@@ -784,7 +849,7 @@ namespace RT64 {
         }
     }
     
-    void GameFrame::buildCallHashMap(uint32_t sceneProjIndex, const Workload &workload, const Projection &proj, std::multimap<uint64_t, GameCallMap> &hashMap) const {
+    void GameFrame::buildCallHashMap(uint32_t sceneProjIndex, const Workload &workload, const Projection &proj, std::vector<std::pair<uint64_t, GameCallMap>> &hashMap) const {
         for (uint32_t c = 0; c < proj.gameCallCount; c++) {
             const GameCall &call = proj.gameCalls[c];
             uint32_t matrixIdHash = 0;
@@ -802,7 +867,7 @@ namespace RT64 {
                 doTileMatching = doTileMatching || (group.tileInterpolation == G_EX_COMPONENT_AUTO);
             }
 
-            hashMap.emplace(hashFromCall(call, matrixIdHash), GameCallMap{ sceneProjIndex, c, doTransformMatching, doTileInterpolation, doTileMatching });
+            hashMap.emplace_back(hashFromCall(call, matrixIdHash), GameCallMap{ sceneProjIndex, c, doTransformMatching, doTileInterpolation, doTileMatching });
         }
     }
 
