@@ -1,3 +1,6 @@
+// The scalar fallback (WebAssembly builds) calls labs() without including what declares it.
+#include <cstdlib>
+
 // Disable SIMD on GCC due to UB when compiling with optimizations.
 
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
@@ -10,6 +13,4 @@
 #define HLSLPP_SCALAR
 #endif
 
-// The scalar fallback (WebAssembly builds) calls labs() without including what declares it.
-#include <cstdlib>
 #include "hlsl++.h"

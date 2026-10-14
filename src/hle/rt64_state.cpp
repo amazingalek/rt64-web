@@ -4,9 +4,10 @@
 
 #include "rt64_state.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cinttypes>
+
+#include <algorithm>
 #include <cstring>
 
 #if defined(_MSC_VER) && !defined(__clang__)
