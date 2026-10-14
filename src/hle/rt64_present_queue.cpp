@@ -436,11 +436,20 @@ namespace RT64 {
     void PresentQueue::pace(bool presentDropped) {
         const uint32_t targetRate = ext.sharedResources->targetRate;
         const uint32_t originalRate = ext.sharedResources->viOriginalRate;
+        auto setPacedRate = [&](uint32_t pacedRate) {
+            if ((pacedRate == 0) != (ext.sharedResources->pacedRate == 0)) {
+                const char *what = (pacedRate > 0) ? "paced to the game's frames while the GPU falls behind" : "back at the display's rate";
+                printf("RT64: presents %s (the game at %u frames a second)\n", what, originalRate);
+            }
+
+            ext.sharedResources->pacedRate = pacedRate;
+        };
+
         if ((targetRate == 0) || (originalRate == 0) || (targetRate <= originalRate)) {
             pacingMultiple = 0;
             pacingPresents.clear();
             pacingDropped = 0;
-            ext.sharedResources->pacedRate = 0;
+            setPacedRate(0);
             return;
         }
 
@@ -514,13 +523,7 @@ namespace RT64 {
         }
 
         // The game's rate may have moved since the number was picked, so it is the even number at most that large.
-        const uint32_t pacedRate = (pacingMultiple > 0) ? (pacedMultipleAtMost(pacingMultiple) * originalRate) : 0;
-        if ((pacedRate == 0) != (ext.sharedResources->pacedRate == 0)) {
-            const char *what = (pacedRate > 0) ? "paced to the game's frames while the GPU falls behind" : "back at the display's rate";
-            printf("RT64: presents %s (the game at %u frames a second)\n", what, originalRate);
-        }
-
-        ext.sharedResources->pacedRate = pacedRate;
+        setPacedRate((pacingMultiple > 0) ? (pacedMultipleAtMost(pacingMultiple) * originalRate) : 0);
     }
 
     void PresentQueue::notifyPresentId(const Present &present) {
