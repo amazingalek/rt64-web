@@ -432,7 +432,12 @@ namespace RT64 {
     // kept, not the rate, since a game's own rate moves (Banjo-Kazooie's between 20 and 30). A present dropped now and
     // then is not the GPU falling behind: a pipeline built behind the game (Chrome) drops one every second or two, and
     // counting those (2 in a second) held GoldenEye's cast credits, 8-12 game frames a second, at one present a frame
-    // for 10-30 s.
+    // for 10-30 s. Nor is a burst of a few: presents stop while the game waits for prebuilt shaders, come through at once
+    // after, and the GPU is busy for a moment with what it was given, so drops are counted over a whole 2 s of presents,
+    // never fewer: judged on the first few dozen after a wait, or after a try of the number above (which starts the count
+    // again), 4 dropped were enough, and Donkey Kong 64 in Firefox went to 30 presents a second right after its boot's
+    // wait and stayed there for 70 s, each try falling straight back. A game at about the display's rate (a launcher's
+    // 60 on a 59-61 Hz display) has nothing to be paced to, and its drops while a page loads aren't counted either.
     void PresentQueue::pace(bool presentDropped) {
         const uint32_t targetRate = ext.sharedResources->targetRate;
         const uint32_t originalRate = ext.sharedResources->viOriginalRate;
@@ -445,20 +450,20 @@ namespace RT64 {
             ext.sharedResources->pacedRate = pacedRate;
         };
 
-        if ((targetRate == 0) || (originalRate == 0) || (targetRate <= originalRate)) {
-            pacingMultiple = 0;
-            pacingPresents.clear();
-            pacingDropped = 0;
-            setPacedRate(0);
-            return;
-        }
-
         // Whether a number of presents a game frame is fewer than the display's rate gives it (by more than 5%), and
         // whether it is spaced evenly on the display: the display's rate a whole multiple of the presents' (within 5%,
         // for a 59 Hz display), or one a frame.
         auto isFewer = [&](uint32_t multiple) {
             return (multiple * originalRate * 20) < (targetRate * 19);
         };
+
+        if ((targetRate == 0) || (originalRate == 0) || !isFewer(1)) {
+            pacingMultiple = 0;
+            pacingPresents.clear();
+            pacingDropped = 0;
+            setPacedRate(0);
+            return;
+        }
 
         auto isEven = [&](uint32_t multiple) {
             const uint32_t rate = multiple * originalRate;
@@ -491,7 +496,8 @@ namespace RT64 {
             pacingPresents.pop_front();
         }
 
-        const bool fallingBehind = (pacingDropped >= 4) && ((pacingDropped * 10) >= pacingPresents.size());
+        const bool wholeWindow = Timer::deltaMicroseconds(pacingPresents.front().first, now) >= 1'900'000;
+        const bool fallingBehind = wholeWindow && (pacingDropped >= 4) && ((pacingDropped * 10) >= pacingPresents.size());
         const int64_t sinceChange = Timer::deltaMicroseconds(pacingChanged, now);
         if (fallingBehind && (pacingMultiple != 1)) {
             pacingMultiple = pacedMultipleAtMost((pacingMultiple > 0) ? (pacingMultiple - 1) : (targetRate / originalRate));
