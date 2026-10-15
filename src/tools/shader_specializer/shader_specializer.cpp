@@ -71,8 +71,131 @@ static int specialize(char **argv) {
     return stream.good() ? 0 : 1;
 }
 
+static bool isIdentifierChar(char c) {
+    return ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9')) || (c == '_');
+}
+
+// naga writes each SPIR-V phi as a variable of its function, `var phi_<n>_: <type>;`, assigned on every edge into the
+// block that reads it, and spirv-opt leaves a RasterPS hundreds of them in one function. Chrome parses a shader module
+// (Tint) on its GPU process's main thread, the one that takes the page's presents, in a time that grows with a
+// function's variables times its branches: a 180 KB RasterPS with ~300 of them took 100-120 ms, so each one built
+// behind the game held the page's presents that long (Pilotwings 64's list, 45 such shaders, made 30 gaps of over 100
+// ms in Chrome 155). As variables of the module (var<private>, one per invocation like a function's) the same shader
+// parses in ~30 ms, and the list's 142 largest in 2.5 s against 6.7. A phi is always written before it is read, so
+// it needn't start at zero each call. Tint reads a private variable as non-uniform where it tracked a function's, so
+// the module turns the derivative uniformity check off, which naga's own output already passed.
+static void privatizePhis(std::string &wgsl) {
+    const std::string Removed(1, '\0');
+    std::vector<std::string> lines;
+    for (size_t start = 0; start <= wgsl.size();) {
+        size_t end = wgsl.find('\n', start);
+        if (end == std::string::npos) {
+            end = wgsl.size();
+        }
+
+        lines.emplace_back(wgsl.substr(start, end - start));
+        start = end + 1;
+    }
+
+    std::vector<size_t> functions;
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (lines[i].compare(0, 3, "fn ") == 0) {
+            functions.emplace_back(i);
+        }
+    }
+
+    std::string declarations;
+    for (size_t f = 0; f < functions.size(); f++) {
+        const size_t first = functions[f];
+        const size_t last = (f + 1 < functions.size()) ? functions[f + 1] : lines.size();
+        std::map<std::string, std::string> renamed;
+        for (size_t i = first; i < last; i++) {
+            std::string &line = lines[i];
+            const size_t var = line.find_first_not_of(' ');
+            if ((var == std::string::npos) || (var == 0) || (line.compare(var, 8, "var phi_") != 0) || (line.back() != ';') ||
+                (line.find('=') != std::string::npos)) {
+                continue;
+            }
+
+            const size_t colon = line.find(": ", var);
+            if (colon == std::string::npos) {
+                continue;
+            }
+
+            const std::string name = line.substr(var + 4, colon - var - 4);
+            const std::string privateName = "phi_f" + std::to_string(f) + name.substr(3);
+            if (wgsl.find(privateName) != std::string::npos) {
+                return;
+            }
+
+            declarations += "var<private> " + privateName + line.substr(colon) + "\n";
+            renamed[name] = privateName;
+            line = Removed;
+        }
+
+        if (renamed.empty()) {
+            continue;
+        }
+
+        for (size_t i = first; i < last; i++) {
+            std::string &line = lines[i];
+            if (line == Removed) {
+                continue;
+            }
+
+            std::string rewritten;
+            for (size_t p = 0; p < line.size();) {
+                if (!isIdentifierChar(line[p])) {
+                    rewritten.push_back(line[p++]);
+                    continue;
+                }
+
+                size_t end = p;
+                while ((end < line.size()) && isIdentifierChar(line[end])) {
+                    end++;
+                }
+
+                const std::string token = line.substr(p, end - p);
+                auto it = renamed.find(token);
+                rewritten += (it != renamed.end()) ? it->second : token;
+                p = end;
+            }
+
+            line = rewritten;
+        }
+    }
+
+    if (declarations.empty()) {
+        return;
+    }
+
+    // Before the first function and the attributes on the lines above it.
+    size_t insertAt = functions[0];
+    while ((insertAt > 0) && (lines[insertAt - 1].compare(0, 1, "@") == 0)) {
+        insertAt--;
+    }
+
+    std::string result = "diagnostic(off, derivative_uniformity);\n";
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (i == insertAt) {
+            result += declarations;
+        }
+
+        if (lines[i] == Removed) {
+            continue;
+        }
+
+        result += lines[i];
+        if (i + 1 < lines.size()) {
+            result.push_back('\n');
+        }
+    }
+
+    wgsl = result;
+}
+
 // PlumeWGSL.cmake's rewrites: the push constant block becomes the uniform buffer plume's WebGPU backend gives it, and
-// a storage texture is write-only unless its format can be read and written in core WebGPU.
+// a storage texture is write-only unless its format can be read and written in core WebGPU. Then privatizePhis().
 static void rewrite(std::string &wgsl) {
     for (const std::string block : { "var<immediate>", "var<push_constant>" }) {
         for (size_t p = wgsl.find(block); p != std::string::npos; p = wgsl.find(block, p)) {
@@ -88,6 +211,8 @@ static void rewrite(std::string &wgsl) {
             wgsl.replace(p, readWrite.size(), ",write>");
         }
     }
+
+    privatizePhis(wgsl);
 }
 
 static int pack(char **argv) {

@@ -642,6 +642,8 @@ endif()
 # out. A RasterPS comes out about 45% smaller (the largest 370 KB to 224 KB), descriptions that differ only in what
 # RasterPS ignores come out the same and are kept once (GoldenEye's 340: 624 different stages to 210, 103 MB of WGSL
 # to 16), and Chrome builds them in about 60% of the time. Without spirv-opt they are the same shaders, only bigger.
+# pack moves the variables naga makes of SPIR-V's phis out of their functions, which Chrome parses about four times
+# faster, on the thread that takes the page's presents (shader_specializer.cpp, privatizePhis()).
 if (RT64_WGSL AND RT64_PREBUILT_SHADER_LIST)
     find_program(RT64_SPIRV_OPT_EXECUTABLE spirv-opt)
     if (NOT RT64_SPIRV_OPT_EXECUTABLE)
