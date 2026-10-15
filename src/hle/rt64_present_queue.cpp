@@ -9,6 +9,10 @@
 
 #include "rt64_workload_queue.h"
 
+#if defined(__EMSCRIPTEN__)
+#   include <emscripten.h>
+#endif
+
 namespace RT64 {
     // PresentQueue
 
@@ -87,6 +91,14 @@ namespace RT64 {
         this->ext = ext;
 
         viRenderer = std::make_unique<VIRenderer>();
+
+#   if defined(__EMSCRIPTEN__)
+        // A page opened with ?uncapped measures how many presents a second it can make: plume reports the display's rate
+        // as the query's (360), the frames are interpolated to it, and none are paced (pace()), so that what the GPU
+        // and the browser can take is what is presented. Each interpolated frame is a color target of the output's size
+        // kept for a game frame: 17 for a 20 fps game at 360, ~530 MB at 3840x2000.
+        uncapped = MAIN_THREAD_EM_ASM_INT({ return new URLSearchParams(location.search).has('uncapped') ? 1 : 0; }) != 0;
+#   endif
 
         presentThreadRunning = true;
         presentThread = new std::thread(&PresentQueue::threadLoop, this);
@@ -440,7 +452,7 @@ namespace RT64 {
     // wait ends: a wait shorter than 2 s left presents from before it in the count beside the burst after it, and
     // Banjo-Kazooie in Chrome went to 30 a second 0.4 s after its 1.5 s wait, for 10 s. A game at about the display's
     // rate (a launcher's 60 on a 59-61 Hz display) has nothing to be paced to, and its drops while a page loads aren't
-    // counted either.
+    // counted either. Nor is a page opened with ?uncapped paced, which drops presents by design.
     void PresentQueue::pace(bool presentDropped) {
         const uint32_t targetRate = ext.sharedResources->targetRate;
         const uint32_t originalRate = ext.sharedResources->viOriginalRate;
@@ -460,7 +472,7 @@ namespace RT64 {
             return (multiple * originalRate * 20) < (targetRate * 19);
         };
 
-        if ((targetRate == 0) || (originalRate == 0) || !isFewer(1)) {
+        if (uncapped || (targetRate == 0) || (originalRate == 0) || !isFewer(1)) {
             pacingMultiple = 0;
             pacingPresents.clear();
             pacingDropped = 0;
