@@ -7,11 +7,11 @@
 #include "common/rt64_thread.h"
 #include "rhi/rt64_render_hooks.h"
 
-#include "rt64_workload_queue.h"
-
 #if defined(__EMSCRIPTEN__)
 #   include <emscripten.h>
 #endif
+
+#include "rt64_workload_queue.h"
 
 namespace RT64 {
     // PresentQueue
