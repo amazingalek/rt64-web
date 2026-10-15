@@ -99,6 +99,7 @@
 #   include "shaders/Im3DVS.hlsl.spirv.h"
 #   include "shaders/ComposePS.hlsl.spirv.h"
 #   include "shaders/DebugPS.hlsl.spirv.h"
+#   include "shaders/DebugPSPerDraw.hlsl.spirv.h"
 #   include "shaders/Im3DPS.hlsl.spirv.h"
 #   include "shaders/PostProcessPS.hlsl.spirv.h"
 #endif
@@ -957,7 +958,17 @@ namespace RT64 {
             layoutBuilder.end();
             debug.pipelineLayout = layoutBuilder.create(device);
 
-            std::unique_ptr<RenderShader> pixelShader = device->createShader(CREATE_SHADER_INPUTS(DebugPS, "PSMain", shaderFormat));
+            std::unique_ptr<RenderShader> pixelShader;
+#       if !defined(RT64_WGSL)
+            if (shaderFormat == RenderShaderFormat::SPIRV) {
+                const SPIRVBlob blob = RT64_TEXTURE_SETS_SPIRV(DebugPS, deviceCapabilities);
+                pixelShader = device->createShader(blob.data, blob.size, "PSMain", shaderFormat);
+            }
+            else
+#       endif
+            {
+                pixelShader = device->createShader(CREATE_SHADER_INPUTS(DebugPS, "PSMain", shaderFormat));
+            }
             RenderGraphicsPipelineDesc pipelineDesc;
             pipelineDesc.pipelineLayout = debug.pipelineLayout.get();
             pipelineDesc.renderTargetBlend[0] = RenderBlendDesc::AlphaBlend();

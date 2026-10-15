@@ -340,6 +340,18 @@ namespace RT64 {
 #   endif
     }
 
+    struct SPIRVBlob {
+        const void *data;
+        size_t size;
+    };
+
+    // The SPIR-V of a shader that uses sets 1 and 2 as the device binds them: each such shader is built a second time
+    // for per-draw textures, as <NAME>PerDrawBlobSPIRV (CMakeLists.txt). Both blob headers must be included.
+#   define RT64_TEXTURE_SETS_SPIRV(NAME, CAPABILITIES)\
+        (RT64::perDrawTextures(CAPABILITIES) ?\
+            RT64::SPIRVBlob{ NAME##PerDrawBlobSPIRV, sizeof(NAME##PerDrawBlobSPIRV) } :\
+            RT64::SPIRVBlob{ NAME##BlobSPIRV, sizeof(NAME##BlobSPIRV) })
+
     struct FramebufferRendererDescriptorDrawTextureSet : RenderDescriptorSetBase {
         static const uint32_t TileCount = 8;
 

@@ -609,6 +609,25 @@ endif()
 build_vertex_shader( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSDynamic.hlsl" "-D DYNAMIC_RENDER_PARAMS")
 build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstant.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS")
 build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")
+# A Vulkan device without descriptor indexing (an old GPU, lavapipe before Mesa 23) gets the framebuffer renderer's
+# per-draw texture sets at run time (perDrawTextures() in rt64_descriptor_sets.h), so the SPIR-V of every shader that
+# uses those sets is built for them too, as <name>PerDraw, and picked by the same test. A WGSL build has only those.
+if (NOT RT64_WGSL)
+    set(PER_DRAW "-D PER_DRAW_TEXTURES")
+    build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSDynamicPerDraw.hlsl" "-D DYNAMIC_RENDER_PARAMS" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSDynamicMSPerDraw.hlsl" "-D DYNAMIC_RENDER_PARAMS" "-D MULTISAMPLING" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantPerDraw.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantMSPerDraw.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantFlatPerDraw.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantFlatMSPerDraw.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterVS.hlsl" "${DXC_VS_OPTS}" "src/shaders/RasterVSDynamicPerDraw.hlsl" "-D DYNAMIC_RENDER_PARAMS" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterVS.hlsl" "${DXC_VS_OPTS}" "src/shaders/RasterVSSpecConstantPerDraw.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/RasterVS.hlsl" "${DXC_VS_OPTS}" "src/shaders/RasterVSSpecConstantFlatPerDraw.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/PostBlendDitherNoisePS.hlsl" "${DXC_PS_OPTS}" "src/shaders/PostBlendDitherNoiseAddPSPerDraw.hlsl" "-D ADD_MODE" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/PostBlendDitherNoisePS.hlsl" "${DXC_PS_OPTS}" "src/shaders/PostBlendDitherNoiseSubPSPerDraw.hlsl" "-D SUB_MODE" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/PostBlendDitherNoisePS.hlsl" "${DXC_PS_OPTS}" "src/shaders/PostBlendDitherNoiseSubNegativePSPerDraw.hlsl" "-D SUB_MODE" "-D NEGATIVE_MODE" ${PER_DRAW})
+    build_shader_spirv(rt64 "src/shaders/DebugPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/DebugPSPerDraw.hlsl" ${PER_DRAW})
+endif()
 
 # Prebuilt shaders for WebGPU. A game that sets RT64_PREBUILT_SHADER_LIST to a list of the shader descriptions it uses
 # (one per line, five hex words: other mode L and H, color combiner L and H, flags, as its page prints them when opened

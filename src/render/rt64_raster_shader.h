@@ -37,7 +37,7 @@ namespace RT64 {
         respv::Shader rasterPSFlat;
         respv::Shader rasterPSFlatMS;
 
-        void initialize();
+        void initialize(const RenderDeviceCapabilities &capabilities);
     };
 
     // The spec constant shaders a WGSL build specializes with override values, each created once: they are the same

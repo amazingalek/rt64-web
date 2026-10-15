@@ -179,7 +179,7 @@ namespace RT64 {
 
         // Initialize the re-spirv optimizer cache.
         if (shaderFormat == RenderShaderFormat::SPIRV) {
-            optimizerCacheSPIRV.initialize();
+            optimizerCacheSPIRV.initialize(device->getCapabilities());
         }
 
         // Create the spec constant shaders before anything draws. plume's WebGPU backend learns from each new shader which

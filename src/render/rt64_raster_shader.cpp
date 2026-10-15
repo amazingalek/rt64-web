@@ -39,6 +39,18 @@
 #   include "shaders/PostBlendDitherNoiseAddPS.hlsl.spirv.h"
 #   include "shaders/PostBlendDitherNoiseSubPS.hlsl.spirv.h"
 #   include "shaders/PostBlendDitherNoiseSubNegativePS.hlsl.spirv.h"
+#   include "shaders/RasterPSDynamicPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterPSDynamicMSPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstantPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstantMSPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstantFlatPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterPSSpecConstantFlatMSPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterVSDynamicPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterVSSpecConstantPerDraw.hlsl.spirv.h"
+#   include "shaders/RasterVSSpecConstantFlatPerDraw.hlsl.spirv.h"
+#   include "shaders/PostBlendDitherNoiseAddPSPerDraw.hlsl.spirv.h"
+#   include "shaders/PostBlendDitherNoiseSubPSPerDraw.hlsl.spirv.h"
+#   include "shaders/PostBlendDitherNoiseSubNegativePSPerDraw.hlsl.spirv.h"
 #endif
 #ifdef _WIN32
 #   include "shaders/RasterPSLibrary.hlsl.dxil.h"
@@ -88,16 +100,20 @@ namespace RT64 {
 
     // OptimizerCacheSPIRV
 
-    void OptimizerCacheSPIRV::initialize() {
+    void OptimizerCacheSPIRV::initialize(const RenderDeviceCapabilities &capabilities) {
 #   if defined(RT64_WGSL)
         assert(false && "A WGSL build has no SPIR-V shaders.");
 #   else
-        rasterVS.parse(RasterVSSpecConstantBlobSPIRV, std::size(RasterVSSpecConstantBlobSPIRV));
-        rasterVSFlat.parse(RasterVSSpecConstantFlatBlobSPIRV, std::size(RasterVSSpecConstantFlatBlobSPIRV));
-        rasterPS.parse(RasterPSSpecConstantBlobSPIRV, std::size(RasterPSSpecConstantBlobSPIRV));
-        rasterPSMS.parse(RasterPSSpecConstantMSBlobSPIRV, std::size(RasterPSSpecConstantMSBlobSPIRV));
-        rasterPSFlat.parse(RasterPSSpecConstantFlatBlobSPIRV, std::size(RasterPSSpecConstantFlatBlobSPIRV));
-        rasterPSFlatMS.parse(RasterPSSpecConstantFlatMSBlobSPIRV, std::size(RasterPSSpecConstantFlatMSBlobSPIRV));
+        const auto parse = [](respv::Shader &shader, const SPIRVBlob &blob) {
+            shader.parse(blob.data, blob.size);
+        };
+
+        parse(rasterVS, RT64_TEXTURE_SETS_SPIRV(RasterVSSpecConstant, capabilities));
+        parse(rasterVSFlat, RT64_TEXTURE_SETS_SPIRV(RasterVSSpecConstantFlat, capabilities));
+        parse(rasterPS, RT64_TEXTURE_SETS_SPIRV(RasterPSSpecConstant, capabilities));
+        parse(rasterPSMS, RT64_TEXTURE_SETS_SPIRV(RasterPSSpecConstantMS, capabilities));
+        parse(rasterPSFlat, RT64_TEXTURE_SETS_SPIRV(RasterPSSpecConstantFlat, capabilities));
+        parse(rasterPSFlatMS, RT64_TEXTURE_SETS_SPIRV(RasterPSSpecConstantFlatMS, capabilities));
         assert(!rasterVS.empty());
         assert(!rasterVSFlat.empty());
         assert(!rasterPS.empty());
@@ -561,12 +577,16 @@ namespace RT64 {
             break;
         }
 #   else
-        case RenderShaderFormat::SPIRV:
-            VSBlob = RasterVSDynamicBlobSPIRV;
-            PSBlob = useMSAA ? RasterPSDynamicMSBlobSPIRV : RasterPSDynamicBlobSPIRV;
-            VSBlobSize = uint32_t(std::size(RasterVSDynamicBlobSPIRV));
-            PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSBlobSPIRV) : std::size(RasterPSDynamicBlobSPIRV));
+        case RenderShaderFormat::SPIRV: {
+            const RenderDeviceCapabilities &capabilities = device->getCapabilities();
+            const SPIRVBlob VS = RT64_TEXTURE_SETS_SPIRV(RasterVSDynamic, capabilities);
+            const SPIRVBlob PS = useMSAA ? RT64_TEXTURE_SETS_SPIRV(RasterPSDynamicMS, capabilities) : RT64_TEXTURE_SETS_SPIRV(RasterPSDynamic, capabilities);
+            VSBlob = VS.data;
+            PSBlob = PS.data;
+            VSBlobSize = uint32_t(VS.size);
+            PSBlobSize = uint32_t(PS.size);
             break;
+        }
 #   endif
 #   ifdef __APPLE__
         case RenderShaderFormat::METAL:
@@ -647,11 +667,16 @@ namespace RT64 {
             postBlendSubNegativePixelShader = device->createShader(PostBlendDitherNoiseSubNegativePSBlobWGSL, sizeof(PostBlendDitherNoiseSubNegativePSBlobWGSL), "PSMain", shaderFormat);
             break;
 #   else
-        case RenderShaderFormat::SPIRV:
-            postBlendAddPixelShader = device->createShader(PostBlendDitherNoiseAddPSBlobSPIRV, std::size(PostBlendDitherNoiseAddPSBlobSPIRV), "PSMain", shaderFormat);
-            postBlendSubPixelShader = device->createShader(PostBlendDitherNoiseSubPSBlobSPIRV, std::size(PostBlendDitherNoiseSubPSBlobSPIRV), "PSMain", shaderFormat);
-            postBlendSubNegativePixelShader = device->createShader(PostBlendDitherNoiseSubNegativePSBlobSPIRV, std::size(PostBlendDitherNoiseSubNegativePSBlobSPIRV), "PSMain", shaderFormat);
+        case RenderShaderFormat::SPIRV: {
+            const RenderDeviceCapabilities &capabilities = device->getCapabilities();
+            const SPIRVBlob add = RT64_TEXTURE_SETS_SPIRV(PostBlendDitherNoiseAddPS, capabilities);
+            const SPIRVBlob sub = RT64_TEXTURE_SETS_SPIRV(PostBlendDitherNoiseSubPS, capabilities);
+            const SPIRVBlob subNegative = RT64_TEXTURE_SETS_SPIRV(PostBlendDitherNoiseSubNegativePS, capabilities);
+            postBlendAddPixelShader = device->createShader(add.data, add.size, "PSMain", shaderFormat);
+            postBlendSubPixelShader = device->createShader(sub.data, sub.size, "PSMain", shaderFormat);
+            postBlendSubNegativePixelShader = device->createShader(subNegative.data, subNegative.size, "PSMain", shaderFormat);
             break;
+        }
 #   endif
 #   ifdef __APPLE__
         case RenderShaderFormat::METAL:
