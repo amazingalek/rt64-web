@@ -217,9 +217,12 @@ namespace RT64 {
     // Where pipelines build in the background (Chrome), the game waits only for what a frame wants. One thread builds
     // the whole list behind the game from its first draw (prebuildAhead), a section at a time in the list's order, the
     // order the recording reached them in; a round moves the rest of its section to the front, and strays go before
-    // that. Section 0, the boot, has only a few seconds of logos before the game wants the rest, so half the threads
-    // build it; the rest is built one at a time, since each thread takes a core in the browser's GPU process and
-    // levels come minutes apart. So the first frame waits only for its own shaders, the panel the page showed for a whole section before the
+    // that. Section 0, the boot, has only a few seconds of logos before the game wants the rest, and section 1 is
+    // usually what follows it by itself or a press of Start later (the attract demo, the menus), so half the threads
+    // build those two; the rest is built one at a time, since each thread takes a core in the browser's GPU process and
+    // levels come minutes apart. With section 1 on one thread, a list whose boot ends at the title (Pilotwings 64's,
+    // so that Firefox draws the title before it builds the menus) waited 3-8 s in Chrome on the menus' 28-36 after Start,
+    // where with them in the boot it never had. So the first frame waits only for its own shaders, the panel the page showed for a whole section before the
     // game started is mostly gone, and a level reached after a minute of play is usually built before the game gets
     // there. Where building a pipeline holds up the device (Firefox, setup()), anything built behind the game would
     // stall its frames, so nothing is: section 0 is built before the game gets past its first frame, a round builds
@@ -312,8 +315,8 @@ namespace RT64 {
         prebuildCount = pipelineCount + uint32_t(prebuildLearned.size());
         prebuildState.assign(RT64PrebuiltShaderCount + prebuildLearned.size(), PrebuildQueued);
         prebuildBoot.assign(prebuildState.size(), false);
-        if (!prebuildSections.empty()) {
-            for (uint32_t index : prebuildSections[0]) {
+        for (uint32_t s = 0; s < std::min<uint32_t>(uint32_t(prebuildSections.size()), 2U); s++) {
+            for (uint32_t index : prebuildSections[s]) {
                 prebuildBoot[index] = true;
             }
         }
@@ -343,9 +346,9 @@ namespace RT64 {
         }
 
         if (specializedShaders) {
-            printf("RT64: %u prebuilt shaders, %u pipelines, in %u sections, and %u learned; built behind the game once it draws (section %s %u at a time, the rest one), the game waiting only for what a frame wants, %u at a time\n",
+            printf("RT64: %u prebuilt shaders, %u pipelines, in %u sections, and %u learned; built behind the game once it draws (sections %s and %s %u at a time, the rest one), the game waiting only for what a frame wants, %u at a time\n",
                 RT64PrebuiltShaderCount, pipelineCount, RT64PrebuiltShaderSectionCount, uint32_t(prebuildLearned.size()), RT64PrebuiltShaderSections[0].name,
-                prebuildBootThreads, threads);
+                (RT64PrebuiltShaderSectionCount > 1) ? RT64PrebuiltShaderSections[1].name : "(none)", prebuildBootThreads, threads);
         }
         else {
             printf("RT64: %u prebuilt shaders, %u pipelines, in %u sections, and %u learned; the game waiting for the %u of section %s, built %u at a time once the game draws\n",
@@ -482,7 +485,7 @@ namespace RT64 {
     }
 
     // Every thread builds the round's shaders, and between rounds the first one builds ahead of the game, with up to
-    // half of them while what is next is section 0's (startPrebuild()).
+    // half of them while what is next is section 0's or 1's (startPrebuild()).
     void RasterShaderCache::prebuildLoop(uint32_t thread) {
 #   if defined(RT64_PREBUILT_SHADERS)
         Thread::setCurrentThreadName("RT64 Prebuild");
