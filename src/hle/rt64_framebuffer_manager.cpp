@@ -778,6 +778,17 @@ namespace RT64 {
         return usedTimestamp;
     }
 
+    bool FramebufferManager::regionsTMEMUseTileCopy(uint64_t tileCopyId) const {
+        // A copy still in TMEM can be drawn with by a later display list, which reaches it by its ID.
+        for (const RegionTMEM &region : activeRegionsTMEM) {
+            if (region.tileCopyId == tileCopyId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     uint64_t FramebufferManager::findTileCopyId(uint32_t width, uint32_t height) {
         assert(width > 0);
         assert(height > 0);
@@ -796,7 +807,7 @@ namespace RT64 {
             }
 
             // Only reuse exact matches.
-            if ((tileCopy.textureWidth == textureWidth) && (tileCopy.textureHeight == textureHeight)) {
+            if ((tileCopy.textureWidth == textureWidth) && (tileCopy.textureHeight == textureHeight) && !regionsTMEMUseTileCopy(it.first)) {
                 tileCopy.usedWidth = width;
                 tileCopy.usedHeight = height;
                 tileCopy.usedTimestamp = usedTimestamp;
@@ -807,6 +818,8 @@ namespace RT64 {
         // Make a new tile with a new Id.
         TileCopy &tileCopy = tileCopies[++newId];
         tileCopy.id = newId;
+        tileCopy.textureWidth = textureWidth;
+        tileCopy.textureHeight = textureHeight;
         tileCopy.usedWidth = width;
         tileCopy.usedHeight = height;
         tileCopy.usedTimestamp = usedTimestamp;

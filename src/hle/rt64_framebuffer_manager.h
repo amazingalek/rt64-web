@@ -181,6 +181,7 @@ namespace RT64 {
         void clearUsedTileCopies();
         uint64_t getUsedTimestamp() const;
         uint64_t findTileCopyId(uint32_t width, uint32_t height);
+        bool regionsTMEMUseTileCopy(uint64_t tileCopyId) const;
         void createTileCopySetup(RenderWorker *renderWorker, const FramebufferOperation &op, hlslpp::float2 resolutionScale, RenderTargetManager &targetManager, std::unordered_set<RenderTarget *> *resizedTargets);
         void createTileCopyRecord(RenderWorker *renderWorker, const FramebufferOperation &op, const FramebufferStorage &fbStorage, RenderTargetManager &targetManager,
             hlslpp::float2 resolutionScale, uint32_t maxFbPairIndex, CommandListCopies &cmdListCopies, CommandListDiscards &cmdListDiscards, const ShaderLibrary *shaderLibrary);
