@@ -129,6 +129,10 @@ namespace RT64 {
         std::unordered_map<DrawTextureStamps, uint32_t, DrawTextureStampsHash> drawTextureSetMap;
         std::unique_ptr<RenderTexture> dummyTileTexture;
         bool dummyTileTextureTransitioned = false;
+#   ifdef __EMSCRIPTEN__
+        // Bound in place of a draw buffer a workload hasn't made yet (updateShaderDescriptorSet).
+        std::unique_ptr<RenderBuffer> dummyStorageBuffer;
+#   endif
         std::unique_ptr<RSPSmoothNormalDescriptorSet> smoothDescSet;
         std::unique_ptr<RSPVertexTestZDescriptorSet> vertexTestZSet;
         interop::FrameParams frameParams;

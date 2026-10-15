@@ -376,10 +376,31 @@ namespace RT64 {
 
         descCommonSet->setBuffer(descCommonSet->FrParams, frameParamsBuffer.get(), sizeof(interop::FrameParams));
         descCommonSet->setBuffer(descCommonSet->instanceRenderIndices, renderIndicesBuffer.get(), RenderBufferStructuredView(sizeof(interop::RenderIndices)));
+#   ifdef __EMSCRIPTEN__
+        // A workload makes a draw buffer the first time it has something to put in it, so one whose draws have used
+        // no tile yet (an untextured boot logo) has no GPU tiles buffer. On WebGPU a set's layout is built from what
+        // is bound (plume), so binding nothing left GPUTiles out of it, and a pipeline built in the background for
+        // that layout with a pixel shader that reads GPUTiles failed ("Binding doesn't exist"), and every command
+        // buffer that drew with it was dropped. A zeroed buffer stands in until the workload has one.
+        if (dummyStorageBuffer == nullptr) {
+            const uint64_t dummySize = std::max({ sizeof(interop::RDPParams), sizeof(interop::RDPTile), sizeof(interop::GPUTile), sizeof(interop::RenderParams) });
+            dummyStorageBuffer = worker->device->createBuffer(RenderBufferDesc::DefaultBuffer(dummySize, RenderBufferFlag::STORAGE));
+        }
+
+        auto drawBuffer = [this](const BufferPair &pair) -> const RenderBuffer * {
+            return (pair.get() != nullptr) ? pair.get() : dummyStorageBuffer.get();
+        };
+
+        descCommonSet->setBuffer(descCommonSet->instanceRDPParams, drawBuffer(drawBuffers->rdpParamsBuffer), RenderBufferStructuredView(sizeof(interop::RDPParams)));
+        descCommonSet->setBuffer(descCommonSet->RDPTiles, drawBuffer(drawBuffers->rdpTilesBuffer), RenderBufferStructuredView(sizeof(interop::RDPTile)));
+        descCommonSet->setBuffer(descCommonSet->GPUTiles, drawBuffer(drawBuffers->gpuTilesBuffer), RenderBufferStructuredView(sizeof(interop::GPUTile)));
+        descCommonSet->setBuffer(descCommonSet->DynamicRenderParams, drawBuffer(drawBuffers->renderParamsBuffer), RenderBufferStructuredView(sizeof(interop::RenderParams)));
+#   else
         descCommonSet->setBuffer(descCommonSet->instanceRDPParams, drawBuffers->rdpParamsBuffer.get(), RenderBufferStructuredView(sizeof(interop::RDPParams)));
         descCommonSet->setBuffer(descCommonSet->RDPTiles, drawBuffers->rdpTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::RDPTile)));
         descCommonSet->setBuffer(descCommonSet->GPUTiles, drawBuffers->gpuTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::GPUTile)));
         descCommonSet->setBuffer(descCommonSet->DynamicRenderParams, drawBuffers->renderParamsBuffer.get(), RenderBufferStructuredView(sizeof(interop::RenderParams)));
+#   endif
 
         // The textures are bound per draw instead, by updateDrawTextureSets().
         if (usePerDrawTextures) {
