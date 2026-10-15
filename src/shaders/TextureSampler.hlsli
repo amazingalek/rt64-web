@@ -80,6 +80,32 @@ float4 loadTileTexture(const GPUTile gpuTile, int3 texelMip) {
 #undef TEXTURE_CALL
 }
 
+#ifdef PER_DRAW_TEXTURES
+// A texel for each tap of a filter (only the first without filtering), in one switch over the slots.
+#define LOAD_TILE_TEXELS(texture) \
+    samples[0] = texture.Load(int3(texels[0], mipLevel)); \
+    if (filtering) { \
+        samples[1] = texture.Load(int3(texels[1], mipLevel)); \
+        samples[2] = texture.Load(int3(texels[2], mipLevel)); \
+        samples[3] = texture.Load(int3(texels[3], mipLevel)); \
+    } \
+    break;
+
+void loadTileTexels(const GPUTile gpuTile, int2 texels[4], uint mipLevel, bool filtering, inout float4 samples[4]) {
+    switch (gpuTile.drawSlot) {
+    case 0: LOAD_TILE_TEXELS(gTileTexture0)
+    case 1: LOAD_TILE_TEXELS(gTileTexture1)
+    case 2: LOAD_TILE_TEXELS(gTileTexture2)
+    case 3: LOAD_TILE_TEXELS(gTileTexture3)
+    case 4: LOAD_TILE_TEXELS(gTileTexture4)
+    case 5: LOAD_TILE_TEXELS(gTileTexture5)
+    case 6: LOAD_TILE_TEXELS(gTileTexture6)
+    default: LOAD_TILE_TEXELS(gTileTexture7)
+    }
+}
+#undef LOAD_TILE_TEXELS
+#endif
+
 void computeLOD(OtherMode otherMode, uint rdpTileCount, float2 primLOD, float resLodScale, float2 ddxUV, float2 ddyUV, inout int tileIndex0, inout int tileIndex1, out float lodFraction) {
     const bool usesLOD = (otherMode.textLOD() == G_TL_LOD);
     if (usesLOD) {
@@ -127,7 +153,8 @@ void computeLOD(OtherMode otherMode, uint rdpTileCount, float2 primLOD, float re
     }
 }
 
-float4 clampWrapMirrorSample(const RDPTile rdpTile, const GPUTile gpuTile, float2 tcScale, int2 texelInt, uint tlut, bool gpuTileUsesTMEM, uint mipLevel) {
+// The texel a tap reads, with the tile's clamp, wrap and mirror applied.
+int2 clampWrapMirrorTexel(const RDPTile rdpTile, const GPUTile gpuTile, float2 tcScale, int2 texelInt) {
     if (rdpTile.cms & G_TX_CLAMP) {
         texelInt.x = clamp(texelInt.x, 0, (round(tcScale.x * rdpTile.lrs) / 4) - (round(tcScale.x * rdpTile.uls) / 4) + round(tcScale.x - 1.0f));
     }
@@ -153,7 +180,11 @@ float4 clampWrapMirrorSample(const RDPTile rdpTile, const GPUTile gpuTile, float
     }
     
     // Allows selection of only particular columns or rows as defined by the tile.
-    texelInt = (texelInt & gpuTile.texelMask) + gpuTile.texelShift;
+    return (texelInt & gpuTile.texelMask) + gpuTile.texelShift;
+}
+
+float4 clampWrapMirrorSample(const RDPTile rdpTile, const GPUTile gpuTile, float2 tcScale, int2 texelInt, uint tlut, bool gpuTileUsesTMEM, uint mipLevel) {
+    texelInt = clampWrapMirrorTexel(rdpTile, gpuTile, tcScale, texelInt);
 
     // Check if tile requires TMEM decoding and sample using dynamic decoding.
     if (gpuTileUsesTMEM) {
@@ -274,6 +305,40 @@ float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool fil
     float4 samples[4];
     const uint nativeSampler = rdpTile.nativeSampler;
     bool gpuTileUsesTMEM = canDecodeTMEM && gpuTileFlagRawTMEM(gpuTile.flags);
+#if defined(WEBGPU) && defined(PER_DRAW_TEXTURES) && !USE_FOR_LOOPS
+    // Every tap's texel is found first, by the native sampler's address mode or by the tile's clamp, wrap and mirror,
+    // and the taps are then loaded in one switch over the draw's texture slots (loadTileTexels()). A switch for each
+    // tap and for each way of finding its texel left a pixel shader whose slot is picked per pixel (mip LOD) with 32
+    // switches of 8 loads: one of GoldenEye's, 224 KB of WGSL, is 185 KB this way with half the loads, and builds in
+    // about 60% of the time in Firefox 158 and Chrome 155 (RTX 2070). GoldenEye's prebuilt list is 16.3 MB of WGSL
+    // instead of 19.0, and Firefox, which builds a section one shader at a time while the game waits, waited 8.7-9.4 s
+    // for its boot and 14.0-21.7 s for Dam against 10.4-11.6 and 17.7-23.3 (three runs each, interleaved). The
+    // ubershader reads its taps in a loop (USE_FOR_LOOPS), a load site already, and keeps it.
+    const bool nativeAddress = (nativeSampler != NATIVE_SAMPLER_NONE) && !gpuTileUsesTMEM;
+    int2 texels[4];
+    [unroll]
+    for (int i = 0; i < 4; i++) {
+        const int2 texelInt = texelBaseInt + int2(i >> 1, i & 1);
+        if (nativeAddress) {
+            texels[i] = nativeSamplerTexel(nativeSampler, texelInt, gpuTile.textureDimensions.xy);
+        }
+        else {
+            texels[i] = clampWrapMirrorTexel(rdpTile, gpuTile, tcScale, texelInt);
+        }
+    }
+
+    if (gpuTileUsesTMEM) {
+        samples[0] = sampleTMEM(texels[0], rdpTile.siz, rdpTile.fmt, rdpTile.address, rdpTile.stride, tlut, rdpTile.palette, tileTMEM(gpuTile));
+        if (filtering) {
+            samples[1] = sampleTMEM(texels[1], rdpTile.siz, rdpTile.fmt, rdpTile.address, rdpTile.stride, tlut, rdpTile.palette, tileTMEM(gpuTile));
+            samples[2] = sampleTMEM(texels[2], rdpTile.siz, rdpTile.fmt, rdpTile.address, rdpTile.stride, tlut, rdpTile.palette, tileTMEM(gpuTile));
+            samples[3] = sampleTMEM(texels[3], rdpTile.siz, rdpTile.fmt, rdpTile.address, rdpTile.stride, tlut, rdpTile.palette, tileTMEM(gpuTile));
+        }
+    }
+    else {
+        loadTileTexels(gpuTile, texels, nativeAddress ? 0 : mipLevel, filtering, samples);
+    }
+#else
     if ((nativeSampler == NATIVE_SAMPLER_NONE) || gpuTileUsesTMEM) {
 #if USE_FOR_LOOPS
         int numSamples = select_uint(filtering, 4, 1);
@@ -308,6 +373,7 @@ float4 sampleTextureLevel(const RDPTile rdpTile, const GPUTile gpuTile, bool fil
         }
 #endif
     }
+#endif
     
     float4 sample00 = samples[0];
     if (filtering) {
