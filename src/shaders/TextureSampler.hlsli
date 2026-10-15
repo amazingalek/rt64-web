@@ -494,6 +494,21 @@ float4 sampleTexture(OtherMode otherMode, RenderFlags renderFlags, float2 inputU
     for (uint i = 0; i < numRDPSamples; i++) {
         textureSamples[i] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[i], usesHDR);
     }
+#elif defined(WEBGPU) && defined(PER_DRAW_TEXTURES)
+    // A level is its four taps' texels found and loaded (sampleTextureLevel()), most of a pixel shader with mip LOD, so
+    // the two levels are sampled in a loop the shader keeps ([loop]) and that code is in it once, not twice. Each index
+    // is a constant, or dxc keeps the arrays in memory. With RasterPS's loop over its two tiles (sampleDrawTile()), a
+    // prebuilt pixel shader with mip LOD is about 70 KB of WGSL instead of 185 (RasterPS.hlsl has what Firefox saves).
+    [loop]
+    for (uint i = 0; i < numRDPSamples; i++) {
+        const float4 levelSample = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, (i == 0) ? RDPMipLevels[0] : RDPMipLevels[1], usesHDR);
+        if (i == 0) {
+            textureSamples[0] = levelSample;
+        }
+        else {
+            textureSamples[1] = levelSample;
+        }
+    }
 #else
     textureSamples[0] = sampleTextureLevel(rdpTile, gpuTile, filterBilerp, filterAverage, linearFiltering, uvCoord, tlut, canDecodeTMEM, RDPMipLevels[0], usesHDR);
     

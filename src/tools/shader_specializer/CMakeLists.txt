@@ -3,8 +3,8 @@ project(shader_specializer)
 set(CMAKE_CXX_STANDARD 17)
 
 add_executable(shader_specializer "shader_specializer.cpp")
-target_link_libraries(shader_specializer re-spirv libzstd_static)
-target_include_directories(shader_specializer PRIVATE ${PROJECT_SOURCE_DIR}/../../contrib/re-spirv ${PROJECT_SOURCE_DIR}/../../contrib/zstd/lib)
+target_link_libraries(shader_specializer libzstd_static)
+target_include_directories(shader_specializer PRIVATE ${PROJECT_SOURCE_DIR}/../../contrib/zstd/lib)
 
 # Built with Emscripten, the tool runs in node at build time, as file_to_c does.
 if (EMSCRIPTEN)

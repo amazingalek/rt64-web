@@ -45,6 +45,33 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
 }
 #endif
 
+#if defined(WEBGPU) && defined(PER_DRAW_TEXTURES)
+// Samples texture 0 or 1 (t) as the two blocks below RasterPS's #else do. With mip LOD the tiles are picked per pixel,
+// so each tile's texture slot is a switch anyway (TextureSampler.hlsli), and RasterPS samples both in a loop the shader
+// keeps, which leaves sampleTexture() in it once: most of a prebuilt pixel shader with mip LOD. Without LOD a specialized
+// shader knows each tile's slot and clamp modes only if it samples them apart, as two calls (one of Majora's Mask's
+// with two tiles is 10 KB of WGSL that way, 60 in the loop). The ubershader always loops. Firefox 158 builds a section's
+// pipelines one at a time while the game waits, and in a test page built GoldenEye's Dam in 5.8-8.3 s against
+// 14.8-19.1, Pilotwings 64's menus in 5.7-8.2 against 13.9-16.3 and Conker's Windy in 4.1-4.4 against 6.3-8.4 (RTX
+// 2070, three runs each, interleaved, a busy host).
+float4 sampleDrawTile(uint t, OtherMode otherMode, RenderFlags flags, int tileIndex0, int tileIndex1, float2 lowResUV, float2 highResUV, float2 ddxUV, float2 ddyUV) {
+    const bool oneCycleHardwareBug = (otherMode.cycleType() == G_CYC_1CYCLE);
+    const bool firstTile = (t == 0) || oneCycleHardwareBug;
+    const uint tileIndex = firstTile ? tileIndex0 : tileIndex1;
+    const uint globalTileIndex = instanceRenderIndices[gConstants.renderIndex].rdpTileIndex + tileIndex;
+    RDPTile rdpTile = RDPTiles[globalTileIndex];
+    if (!renderFlagDynamicTiles(flags)) {
+        rdpTile.cms = firstTile ? renderCMS0(flags) : renderCMS1(flags);
+        rdpTile.cmt = firstTile ? renderCMT0(flags) : renderCMT1(flags);
+        rdpTile.nativeSampler = firstTile ? renderFlagNativeSampler0(flags) : renderFlagNativeSampler1(flags);
+    }
+
+    const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[gConstants.renderIndex].rdpTileIndex, tileIndex);
+    const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? highResUV : lowResUV;
+    return sampleTexture(otherMode, flags, textureUV, ddxUV, ddyUV, rdpTile, gpuTile, (t == 1) && oneCycleHardwareBug);
+}
+#endif
+
 LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float2 vertexUV, float4 vertexSmoothColor, float4 vertexFlatColor,
     bool isFrontFace, out float4 resultColor, out float4 resultAlpha) 
 {
@@ -148,6 +175,40 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
 
     float4 texVal0 = float4(0.0f, 0.0f, 0.0f, 1.0f);
     float4 texVal1 = float4(0.0f, 0.0f, 0.0f, 1.0f);
+#if defined(WEBGPU) && defined(PER_DRAW_TEXTURES)
+    // The tiles in a loop or apart: sampleDrawTile() says when.
+    const bool usesTexture0 = renderFlagUsesTexture0(rp.flags);
+    const bool usesTexture1 = renderFlagUsesTexture1(rp.flags);
+    const bool loopTiles = usesTexture0 && usesTexture1 && (otherMode.textLOD() == G_TL_LOD);
+#if !defined(DYNAMIC_RENDER_PARAMS)
+    if (!loopTiles) {
+        if (usesTexture0) {
+            texVal0 = sampleDrawTile(0, otherMode, rp.flags, tileIndex0, tileIndex1, lowResUV, highResUV, ddxVertexUV, ddyVertexUV);
+        }
+
+        if (usesTexture1) {
+            texVal1 = sampleDrawTile(1, otherMode, rp.flags, tileIndex0, tileIndex1, lowResUV, highResUV, ddxVertexUV, ddyVertexUV);
+        }
+    }
+    else
+#endif
+    {
+        [loop]
+        for (uint t = 0; t < 2; t++) {
+            if (!((t == 0) ? usesTexture0 : usesTexture1)) {
+                continue;
+            }
+
+            const float4 texVal = sampleDrawTile(t, otherMode, rp.flags, tileIndex0, tileIndex1, lowResUV, highResUV, ddxVertexUV, ddyVertexUV);
+            if (t == 0) {
+                texVal0 = texVal;
+            }
+            else {
+                texVal1 = texVal;
+            }
+        }
+    }
+#else
     if (renderFlagUsesTexture0(rp.flags)) {
         const uint globalTileIndex = instanceRenderIndices[gConstants.renderIndex].rdpTileIndex + tileIndex0;
         RDPTile rdpTile = RDPTiles[globalTileIndex];
@@ -178,7 +239,8 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         const uint nativeSampler = renderFlagNativeSampler1(rp.flags);
         texVal1 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, oneCycleHardwareBug);
     }
-    
+#endif
+
     // Color combiner.
     float4 shadeColor = vertexColor;
     float4 combinerColor;

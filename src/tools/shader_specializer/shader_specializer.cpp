@@ -2,10 +2,9 @@
 // RT64
 //
 
-// Prebuilt shaders for WebGPU (RT64_PREBUILT_SHADER_LIST in CMakeLists.txt), in two steps that naga runs between:
+// Prebuilt shaders for WebGPU (RT64_PREBUILT_SHADER_LIST in CMakeLists.txt), after spirv-opt has specialized each
+// description and naga has written it as WGSL:
 //
-//   shader_specializer specialize <in.spv> <out.spv> <otherModeL> <otherModeH> <combinerL> <combinerH> <flags>
-//       folds a shader description into a spec constant shader's SPIR-V with re-spirv, as RT64 does on Vulkan.
 //   shader_specializer pack <list> <dir> <out.c> <header>
 //       reads naga's <dir>/<description>.vs.wgsl, .ps.wgsl (dual-source blending) and .ps-single.wgsl (without)
 //       for every line of the list, rewrites them as
@@ -27,8 +26,6 @@
 
 #include <zstd.h>
 
-#include "re-spirv.h"
-
 static bool readFile(const std::string &path, std::string &data) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream.is_open()) {
@@ -40,35 +37,6 @@ static bool readFile(const std::string &path, std::string &data) {
     buffer << stream.rdbuf();
     data = buffer.str();
     return true;
-}
-
-static int specialize(char **argv) {
-    std::string input;
-    if (!readFile(argv[0], input)) {
-        return 1;
-    }
-
-    respv::Shader shader(input.data(), input.size());
-    if (shader.empty()) {
-        fprintf(stderr, "shader_specializer: %s isn't SPIR-V re-spirv can parse\n", argv[0]);
-        return 1;
-    }
-
-    // The spec constants' ids are RT64's: other mode L and H, color combiner L and H, flags.
-    std::vector<respv::SpecConstant> specConstants;
-    for (uint32_t i = 0; i < 5; i++) {
-        specConstants.emplace_back(i, std::vector<uint32_t>{ uint32_t(strtoul(argv[2 + i], nullptr, 16)) });
-    }
-
-    std::vector<uint8_t> output;
-    if (!respv::Optimizer::run(shader, specConstants.data(), uint32_t(specConstants.size()), output)) {
-        fprintf(stderr, "shader_specializer: re-spirv couldn't specialize %s\n", argv[0]);
-        return 1;
-    }
-
-    std::ofstream stream(argv[1], std::ios::binary);
-    stream.write(reinterpret_cast<const char *>(output.data()), output.size());
-    return stream.good() ? 0 : 1;
 }
 
 static bool isIdentifierChar(char c) {
@@ -348,13 +316,10 @@ static int pack(char **argv) {
 }
 
 int main(int argc, char *argv[]) {
-    if ((argc == 9) && (std::string(argv[1]) == "specialize")) {
-        return specialize(argv + 2);
-    }
-    else if ((argc == 6) && (std::string(argv[1]) == "pack")) {
+    if ((argc == 6) && (std::string(argv[1]) == "pack")) {
         return pack(argv + 2);
     }
 
-    fprintf(stderr, "usage: shader_specializer specialize <in.spv> <out.spv> <5 hex words> | pack <list> <dir> <out.c> <header>\n");
+    fprintf(stderr, "usage: shader_specializer pack <list> <dir> <out.c> <header>\n");
     return 1;
 }
