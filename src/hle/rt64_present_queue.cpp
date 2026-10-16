@@ -409,28 +409,35 @@ namespace RT64 {
             if (presentFrame && swapChainValid) {
                 // Wait until the approximate time the next present should be at the current intended rate.
                 if ((presentTimestamp != Timestamp()) && (targetRate > 0) && (targetRate > viOriginalRate)) {
+#               if defined(__EMSCRIPTEN__)
+                    // On a fixed timeline: each present's slot is one period after the last one's, not after the moment
+                    // it went out, so the time spent past a slot (the sleep waking on the browser's timer, wait()'s trip
+                    // to the page's thread) isn't added to every period. In Chrome the pages of games below the
+                    // display's rate presented every 18 ms, 55.6 a second, where those at its rate, which never sleep
+                    // here, presented 60. A present a whole period past its slot or more starts the slots from itself.
+                    const auto presentPeriod = std::chrono::nanoseconds(1'000'000'000 / targetRate);
+                    if ((presentSlot == Timestamp()) || ((presentTimestamp - presentSlot) >= presentPeriod)) {
+                        presentSlot = presentTimestamp;
+                    }
+
+                    presentSlot += presentPeriod;
+                    Timer::preciseSleepUntil(presentSlot);
+#               else
                     Timer::preciseSleepUntil(presentTimestamp + std::chrono::nanoseconds(1'000'000'000 / targetRate));
+#               endif
                 }
+#           if defined(__EMSCRIPTEN__)
+                else {
+                    presentSlot = Timestamp();
+                }
+#           endif
 
                 if (presentWaitEnabled) {
                     ext.swapChain->wait();
                 }
 
                 RenderCommandSemaphore *waitSemaphore = drawSemaphores[swapChainIndex].get();
-#           if defined(__EMSCRIPTEN__)
-                // A present takes the slot one period after the last one's rather than the moment it goes out, so the
-                // time spent past a slot (the sleep waking on the browser's timer, wait()'s trip to the page's thread)
-                // isn't added to every period: on a page the interpolated frames went out every 18 ms, 55.6 a second,
-                // where a game at the display's rate, which never sleeps here, presented 60. A present a whole period
-                // late or more starts the slots again from itself.
-                const Timestamp presentNow = Timer::current();
-                const auto presentPeriod = std::chrono::nanoseconds(1'000'000'000 / std::max(targetRate, 1U));
-                const bool presentOnSlot = (presentTimestamp != Timestamp()) && (targetRate > viOriginalRate) &&
-                    ((presentNow - presentTimestamp) < (2 * presentPeriod));
-                presentTimestamp = presentOnSlot ? (presentTimestamp + presentPeriod) : presentNow;
-#           else
                 presentTimestamp = Timer::current();
-#           endif
                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
                 presentProfiler.logAndRestart();
             }

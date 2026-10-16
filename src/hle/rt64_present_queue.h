@@ -68,6 +68,7 @@ namespace RT64 {
         uint32_t pacingPrebuildWaits = 0;
         Timestamp pacingPrebuildWaited;
         bool uncapped = false;
+        Timestamp presentSlot;
 
         PresentQueue();
         ~PresentQueue();
