@@ -16,6 +16,8 @@ option(RT64_SDL_WINDOW_VULKAN "Build RT64 to expect an SDL Window outside of Win
 option(RT64_PER_DRAW_TEXTURES "Bind textures per draw on every device, as devices without descriptor indexing (WebGPU) need; to test that path" OFF)
 option(RT64_PACKED_RSP_INPUTS "Gather the RSP compute shaders' inputs into one buffer on every device, as WebGPU's 8 storage buffers per stage need; to test that path" OFF)
 option(RT64_FLIPPED_RECT_HIGH_RES "Sample a high-res replacement on a rect drawn backwards on the texel the RDP picks, not one native pixel behind it (always on with Emscripten)" OFF)
+option(RT64_UNEVEN_FRAME_RATES "Interpolate a game whose last frames took an uneven number of VIs (the slowest at most twice the fastest) at the rate of the fastest, not leave it uninterpolated (always on with Emscripten)" OFF)
+option(RT64_OFFSCREEN_WORKLOADS "A workload that draws only to framebuffers the VI has not shown is a pass of the next one's game frame, so a game that draws such a pass in a display list of its own interpolates (always on with Emscripten)" OFF)
 
 if (NOT ${RT64_STATIC})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -527,6 +529,12 @@ if (RT64_PACKED_RSP_INPUTS)
 endif()
 if (RT64_WGSL)
     target_compile_definitions(rt64 PUBLIC RT64_WGSL=1)
+endif()
+if (RT64_OFFSCREEN_WORKLOADS OR RT64_WGSL)
+    target_compile_definitions(rt64 PUBLIC RT64_OFFSCREEN_WORKLOADS=1)
+endif()
+if (RT64_UNEVEN_FRAME_RATES OR RT64_WGSL)
+    target_compile_definitions(rt64 PRIVATE RT64_UNEVEN_FRAME_RATES=1)
 endif()
 
 # Add common libraries.

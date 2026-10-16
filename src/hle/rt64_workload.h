@@ -226,6 +226,9 @@ namespace RT64 {
         FramebufferStorage fbStorage;
         uint32_t viOriginalRate;
         hlslpp::uint2 viFbSize = {};
+        // Draws only to framebuffers the VI hasn't shown lately (State::fullSync): an offscreen pass, which with
+        // RT64_OFFSCREEN_WORKLOADS is part of the next workload's game frame (WorkloadQueue::renderThreadLoop).
+        bool offscreenOnly = false;
         DebuggerRenderer debuggerRenderer;
         DebuggerCamera debuggerCamera;
         std::multimap<uint32_t, uint32_t> transformIdMap;

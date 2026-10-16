@@ -1918,6 +1918,24 @@ namespace RT64 {
             }
         }
         
+        // Whether the workload draws to any framebuffer the VI has shown lately.
+        bool viShowsAny = false;
+        bool drawsShown = false;
+        for (const VIHistory::Present &entry : viHistory.history) {
+            if (!entry.vi.visible()) {
+                continue;
+            }
+
+            viShowsAny = true;
+            for (uint32_t f = 0; (f < workload.fbPairCount) && !drawsShown; f++) {
+                const FramebufferPair &fbPair = workload.fbPairs[f];
+                drawsShown = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == entry.vi.fbAddress()) &&
+                    (fbPair.colorImage.width == entry.vi.fbSize().x) && (fbPair.colorImage.siz == entry.vi.fbSiz());
+            }
+        }
+
+        workload.offscreenOnly = viShowsAny && (workload.fbPairCount > 0) && !drawsShown;
+
         // Advance the workload queue at the end of a full synchronization.
         advanceWorkload(workload, false);
         ext.workloadQueue->advanceToNextWorkload();

@@ -902,6 +902,9 @@ namespace RT64 {
         uint32_t displayRateForTicks = 0;
         int processCursor = -1;
         bool frameReduction = false;
+        GameFrame offscreenFrame;
+        bool lastWorkloadOffscreen = false;
+        bool barrierHeld = false;
         while (threadsRunning) {
             {
                 std::unique_lock<std::mutex> cursorLock(cursorMutex);
@@ -934,22 +937,36 @@ namespace RT64 {
                 workloadProfiler.start();
                 threadConfigurationUpdate(workload.viFbSize, workloadConfig);
 
+                // With RT64_OFFSCREEN_WORKLOADS a workload that draws only offscreen (Workload::offscreenOnly) is a pass of the
+                // game frame the next workload draws, as when a game draws its shadows' render targets in a display list of
+                // their own before the frame's. It's drawn, but it isn't a frame: the next one is matched against the frame
+                // before it, and the present's framebuffers and interpolated frames stay that frame's. Otherwise each workload
+                // is a frame, and the frame after such a pass matched nothing and was never interpolated. One pass at most
+                // between two frames: the frame before stays out of the writer's reach until the next frame is drawn (the
+                // barrier), and the queue holds two more workloads for it (WORKLOAD_QUEUE_SIZE).
+#           if RT64_OFFSCREEN_WORKLOADS
+                const bool offscreenPass = workload.offscreenOnly && !workload.paused && !lastWorkloadOffscreen && !gameFrames[curFrameIndex].workloads.empty();
+#           else
+                const bool offscreenPass = false;
+#           endif
+                lastWorkloadOffscreen = offscreenPass;
+
                 // FIXME: This is a very hacky way to find out if we need to advance the frame if the workload was paused for the first time.
-                if (!workload.paused || (!gameFrames[curFrameIndex].workloads.empty() && (gameFrames[curFrameIndex].workloads[0] != (uint32_t)processCursor))) {
+                if (!offscreenPass && (!workload.paused || (!gameFrames[curFrameIndex].workloads.empty() && (gameFrames[curFrameIndex].workloads[0] != (uint32_t)processCursor)))) {
                     prevFrameIndex = curFrameIndex;
                     curFrameIndex = (curFrameIndex + 1) % gameFrames.size();
                 }
                 
                 // TODO: The frame detection needs to be more elaborate than just matching one workload to one frame.
-                GameFrame &curFrame = gameFrames[curFrameIndex];
-                const GameFrame &prevFrame = gameFrames[prevFrameIndex];
+                GameFrame &curFrame = offscreenPass ? offscreenFrame : gameFrames[curFrameIndex];
+                const GameFrame &prevFrame = offscreenPass ? offscreenFrame : gameFrames[prevFrameIndex];
                 uint32_t workloadIndex = processCursor;
                 curFrame.set(*this, &workloadIndex, 1);
 
                 // Detect the color image to interpolate for this workload.
                 RenderTargetKey interpolationTargetKey;
                 int32_t interpolationTargetFbPairIndex = -1;
-                {
+                if (!offscreenPass) {
                     std::scoped_lock<std::mutex> managerLock(ext.sharedResources->managerMutex);
                     FramebufferManager &fbManager = ext.sharedResources->framebufferManager;
                     std::vector<uint32_t> &colorVector = ext.sharedResources->colorImageAddressVector;
@@ -993,7 +1010,7 @@ namespace RT64 {
                 float prevFrameWeight = 0.0f;
                 float curFrameWeight = 1.0f;
                 float deltaTimeMs = 1.0f / 30.0f;
-                const bool requiresFrameMatching = (workloadConfig.targetRate > 0) || workloadConfig.raytracingEnabled;
+                const bool requiresFrameMatching = !offscreenPass && ((workloadConfig.targetRate > 0) || workloadConfig.raytracingEnabled);
                 bool generateInterpolatedFrames = false;
                 bool velocityUploaderUsed = false;
                 bool tileInterpolationUsed = false;
@@ -1042,7 +1059,7 @@ namespace RT64 {
                 
                 // Get the current and previous set of frame counters. The other set can be in use by the present queue. Skip if no new present event has arrived before this workload event.
                 InterpolatedFrameCounters &prevFrameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
-                const bool useDifferentCounters = (lastPresentId != workload.presentId);
+                const bool useDifferentCounters = !offscreenPass && (lastPresentId != workload.presentId);
                 if (useDifferentCounters) {
                     ext.sharedResources->interpolatedFramesIndex = ext.sharedResources->interpolatedFramesIndex ^ 1;
                     lastPresentId = workload.presentId;
@@ -1057,10 +1074,12 @@ namespace RT64 {
                 }
 
                 InterpolatedFrameCounters &curFrameCounters = ext.sharedResources->interpolatedFrames[ext.sharedResources->interpolatedFramesIndex];
-                curFrameCounters.skipped = false;
-                curFrameCounters.presented = 0;
-                curFrameCounters.available = 0;
-                curFrameCounters.count = displayFrames;
+                if (!offscreenPass) {
+                    curFrameCounters.skipped = false;
+                    curFrameCounters.presented = 0;
+                    curFrameCounters.available = 0;
+                    curFrameCounters.count = displayFrames;
+                }
 
                 // Create as many render targets as required to store the interpolated targets.
                 auto &interpolatedTargets = ext.sharedResources->interpolatedColorTargets;
@@ -1153,6 +1172,10 @@ namespace RT64 {
                         {
                             std::scoped_lock<std::mutex> cursorLock(cursorMutex);
                             skipWorkloadNow = ((frame + 1) < displayFrames) && (writeCursor != threadCursor);
+#                       if RT64_OFFSCREEN_WORKLOADS
+                            // An offscreen pass alone is the start of the next frame, not the frame: these frames go on.
+                            skipWorkloadNow = skipWorkloadNow && !(workloads[threadCursor].offscreenOnly && (int((threadCursor + 1) % workloads.size()) == writeCursor));
+#                       endif
                         }
 
                         {
@@ -1184,7 +1207,16 @@ namespace RT64 {
 
                 threadConfigurationValidate();
 
-                if (!workload.paused) {
+                // The barrier stays on the frame before an offscreen pass, and catches up once the next frame is drawn.
+                if (offscreenPass) {
+                    barrierHeld = true;
+                }
+                else if (!workload.paused) {
+                    if (barrierHeld) {
+                        threadAdvanceBarrier();
+                        barrierHeld = false;
+                    }
+
                     threadAdvanceBarrier();
                 }
 

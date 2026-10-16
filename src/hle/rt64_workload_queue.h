@@ -23,7 +23,16 @@
 #   include "render/rt64_raytracing_shader_cache.h"
 #endif
 
-#define WORKLOAD_QUEUE_SIZE 4
+#if RT64_OFFSCREEN_WORKLOADS
+// Two more than upstream's: while a frame after an offscreen pass is drawn, the frame before the pass stays out of the
+// writer's reach too (WorkloadQueue::renderThreadLoop), and the game must still be able to queue its next pass and its
+// next frame, which is what ends the frame's interpolated frames. With four it could queue nothing, and waited for every
+// interpolated frame to be presented: its frames took longer, its rate fell and the interpolated frames grew, down to
+// a rate of one or two a second and a color target for each of hundreds of display frames.
+#   define WORKLOAD_QUEUE_SIZE 6
+#else
+#   define WORKLOAD_QUEUE_SIZE 4
+#endif
 
 namespace RT64 {
     struct PresentQueue;

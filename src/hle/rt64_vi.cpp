@@ -162,13 +162,22 @@ namespace RT64 {
     }
 
     uint32_t VIHistory::logicalRateFromFactors() {
+        const uint32_t FullRate = 60; // TODO: PAL support.
         if ((factors[0] != 0) && std::all_of(factors.begin(), factors.end(), [&](uint32_t factor) { return factor == factors[0]; })) {
-            const uint32_t FullRate = 60; // TODO: PAL support.
             return FullRate / factors[0];
         }
-        else {
-            return 0;
+#   if RT64_UNEVEN_FRAME_RATES
+        // With RT64_UNEVEN_FRAME_RATES frames that took an uneven number of VIs (a game at 30 dropping to 20 when a frame
+        // runs long, or VIs that come unevenly) are interpolated at the fastest of them, not left uninterpolated: a frame
+        // that comes later holds the last interpolated frame until it does, and none is cut short by the next. Only while
+        // the slowest took at most twice the VIs of the fastest, so a load's frame of dozens of VIs leaves its frames
+        // uninterpolated as before: RT64 keeps a color target for every display frame of a game frame.
+        const auto range = std::minmax_element(factors.begin(), factors.end());
+        if ((*range.first != 0) && (*range.second <= (*range.first * 2))) {
+            return FullRate / *range.first;
         }
+#   endif
+        return 0;
     }
 
     const VIHistory::Present &VIHistory::top() const {
