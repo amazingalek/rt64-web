@@ -33,6 +33,8 @@ namespace RT64 {
             struct {
                 ShaderDescription shaderDesc;
                 const RenderPipeline *pipeline;
+                // A prebuilt decal's first draw on WebGPU, which marks where it passes (RasterShader::decalMarkPipeline).
+                const RenderPipeline *decalMarkPipeline;
                 interop::float2 screenScale;
                 interop::float2 screenOffset;
                 RenderRect scissor;

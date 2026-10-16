@@ -190,7 +190,7 @@ namespace RT64 {
 
         // Create dummy depth target if it hasn't been created yet.
         if (dummyDepthTarget == nullptr) {
-            RenderTextureDesc dummyDepthDesc = RenderTextureDesc::DepthTarget(4, 4, RenderFormat::D32_FLOAT, multisampling);
+            RenderTextureDesc dummyDepthDesc = RenderTextureDesc::DepthTarget(4, 4, RenderTarget::depthBufferFormat(), multisampling);
             dummyDepthTarget = worker->device->createTexture(dummyDepthDesc);
             dummyDepthTarget->setName("Framebuffer Renderer Depth Dummy");
             dummyDepthTargetView = dummyDepthTarget->createTextureView(RenderTextureViewDesc::Texture2D(dummyDepthDesc.format));
@@ -499,7 +499,7 @@ namespace RT64 {
         bool previousVertexTestZ = false;
         const RenderPipeline *previousPipeline = nullptr;
         RenderRect previousScissor;
-        interop::RasterParams rasterParams;
+        interop::RasterParams rasterParams = {};
         RenderDescriptorSet *descRealFbSet = framebuffer.descRealFbSet->get();
         RenderDescriptorSet *descDummyFbSet = framebuffer.descDummyFbSet->get();
         const RenderDescriptorSet *previousDrawTextureSet = nullptr;
@@ -588,13 +588,14 @@ namespace RT64 {
                 }
 
                 // A new pass must be started if decals are required and something wrote to the depth buffer before this call.
+                // A prebuilt decal on WebGPU reads no depth and writes the stencil, so it needs the pass that writes them.
                 const interop::OtherMode otherMode = triangles.shaderDesc.otherMode;
                 bool depthDecal = (otherMode.zMode() == ZMODE_DEC);
                 bool depthWrite = otherMode.zUpd();
-                if (depthDecal) {
+                if (depthDecal && (triangles.decalMarkPipeline == nullptr)) {
                     switchToDepthRead();
                 }
-                else if (!depthDecal && depthWrite) {
+                else if (depthWrite || (triangles.decalMarkPipeline != nullptr)) {
                     switchToDepthWrite();
                 }
 
@@ -619,6 +620,18 @@ namespace RT64 {
                 rasterParams.renderIndex = i;
                 rasterParams.screenScale = triangles.screenScale;
                 rasterParams.screenOffset = triangles.screenOffset;
+
+                // A prebuilt decal's first draw marks the stencil where the surface is no deeper than its high bound
+                // (RasterShader::createPipeline()).
+                if (triangles.decalMarkPipeline != nullptr) {
+                    worker->commandList->setPipeline(triangles.decalMarkPipeline);
+                    rasterParams.decalDepthHigh = 1;
+                    worker->commandList->setGraphicsPushConstants(0, &rasterParams);
+                    drawCallTriangles(drawCall);
+                    worker->commandList->setPipeline(triangles.pipeline);
+                    rasterParams.decalDepthHigh = 0;
+                }
+
                 worker->commandList->setGraphicsPushConstants(0, &rasterParams);
 
                 drawCallTriangles(drawCall);
@@ -1665,8 +1678,10 @@ namespace RT64 {
                         triangles.shaderDesc = call.shaderDesc;
 
                         RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->getGPUShader(call.shaderDesc);
+                        triangles.decalMarkPipeline = nullptr;
                         if (gpuShader != nullptr) {
                             triangles.pipeline = gpuShader->pipeline.get();
+                            triangles.decalMarkPipeline = gpuShader->decalMarkPipeline.get();
                         }
                         else {
                             const bool copyMode = (call.shaderDesc.otherMode.cycleType() == G_CYC_COPY);

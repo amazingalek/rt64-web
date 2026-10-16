@@ -338,10 +338,17 @@ namespace RT64 {
 
         std::unique_ptr<RenderShader> vertexShader = device->createShader(vertexWGSL, vertexWGSLSize, "VSMain", RenderShaderFormat::WGSL);
         std::unique_ptr<RenderShader> pixelShader = device->createShader(pixelWGSL, pixelWGSLSize, "PSMain", RenderShaderFormat::WGSL);
-        createPipelineFor(pipelineLayout, vertexShader.get(), pixelShader.get(), {}, multisampling);
+        createPipelineFor(pipelineLayout, vertexShader.get(), pixelShader.get(), {}, multisampling, prebuiltDecalStencil(desc));
     }
 
-    void RasterShader::createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling) {
+    // A prebuilt decal's pixel shader writes its depth bounds (CMakeLists.txt) and draws with the stencil, which the
+    // depth target has where the device has depth32float-stencil8 (RT64::Application). Without it the prebuilt
+    // decals can't be used, and each is specialized at run time instead, as one the list missed.
+    bool RasterShader::prebuiltDecalStencil(const ShaderDescription &desc) {
+        return (desc.otherMode.zMode() == ZMODE_DEC);
+    }
+
+    void RasterShader::createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling, bool decalStencil) {
         // Create root signature and PSO.
         PipelineCreation creation;
         creation.device = device;
@@ -352,7 +359,12 @@ namespace RT64 {
         setPipelineState(desc, creation);
         creation.specConstants = specConstants;
         creation.multisampling = multisampling;
+        creation.decalStencil = decalStencil ? DecalStencil::Draw : DecalStencil::None;
         pipeline = createPipeline(creation);
+        if (decalStencil) {
+            creation.decalStencil = DecalStencil::Mark;
+            decalMarkPipeline = createPipeline(creation);
+        }
     }
 
     // What of a description goes into its pipeline besides its shaders.
@@ -452,7 +464,7 @@ namespace RT64 {
         pipelineDesc.depthEnabled = c.zCmp || c.zUpd;
         pipelineDesc.depthFunction = c.zCmp ? RenderComparisonFunction::LESS : RenderComparisonFunction::ALWAYS;
         pipelineDesc.depthWriteEnabled = c.zUpd;
-        pipelineDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
+        pipelineDesc.depthTargetFormat = RenderTarget::depthBufferFormat();
         pipelineDesc.multisampling = c.multisampling;
         pipelineDesc.inputSlots = RasterInputSlots;
         pipelineDesc.inputSlotsCount = uint32_t(std::size(RasterInputSlots));
@@ -481,6 +493,38 @@ namespace RT64 {
         if (c.cvgAdd) {
             targetBlend.blendEnabled = true;
             targetBlend.dstBlendAlpha = RenderBlend::ONE;
+        }
+
+        // A prebuilt decal on WebGPU checks its depth with two depth tests and writes none (RasterPS.hlsl,
+        // DECAL_DEPTH_BOUNDS). The first draw writes the highest surface depth that passes and no color, and adds one
+        // to the stencil wherever the surface is no deeper; the second writes the lowest, draws where the stencil isn't
+        // zero and the surface is no nearer, and takes one off wherever the stencil isn't zero, so it ends at zero
+        // again, as a depth target's stencil is between draws. The two draws are the same fragments, which the same
+        // pixel shader discards alike, so each fragment of the second finds the first's mark, except where the decal
+        // covers a pixel twice and only one of its fragments passed the first test, where either may draw.
+        if (c.decalStencil != DecalStencil::None) {
+            const bool mark = (c.decalStencil == DecalStencil::Mark);
+            RenderStencilFaceDesc stencilFace;
+            if (mark) {
+                stencilFace.compareFunction = RenderComparisonFunction::ALWAYS;
+                stencilFace.passOp = RenderStencilOp::INCREMENT_AND_CLAMP;
+                targetBlend.renderTargetWriteMask = 0;
+            }
+            else {
+                stencilFace.compareFunction = RenderComparisonFunction::NOT_EQUAL;
+                stencilFace.passOp = RenderStencilOp::DECREMENT_AND_CLAMP;
+                stencilFace.depthFailOp = RenderStencilOp::DECREMENT_AND_CLAMP;
+            }
+
+            pipelineDesc.depthEnabled = true;
+            pipelineDesc.depthWriteEnabled = false;
+            pipelineDesc.depthFunction = mark ? RenderComparisonFunction::GREATER_EQUAL : RenderComparisonFunction::LESS_EQUAL;
+            pipelineDesc.stencilEnabled = true;
+            pipelineDesc.stencilReadMask = 0xFF;
+            pipelineDesc.stencilWriteMask = 0xFF;
+            pipelineDesc.stencilReference = 0;
+            pipelineDesc.stencilFrontFace = stencilFace;
+            pipelineDesc.stencilBackFace = stencilFace;
         }
 
         return c.device->createGraphicsPipeline(pipelineDesc);
@@ -695,7 +739,7 @@ namespace RT64 {
         postBlendDesc.renderTargetFormat[0] = RenderTarget::colorBufferFormat(shaderLibrary->usesHDR);
         postBlendDesc.renderTargetCount = 1;
         postBlendDesc.cullMode = RenderCullMode::NONE;
-        postBlendDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
+        postBlendDesc.depthTargetFormat = RenderTarget::depthBufferFormat();
         postBlendDesc.multisampling = multisampling;
         postBlendDesc.inputSlots = RasterInputSlots;
         postBlendDesc.inputSlotsCount = uint32_t(std::size(RasterInputSlots));

@@ -45,6 +45,41 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
 }
 #endif
 
+#if defined(DECAL_DEPTH_BOUNDS)
+// A decal's pixel shader on WebGPU, prebuilt: it reads no depth, so a decal draws in the pass that writes depth. A pass
+// can read the depth it draws to only if it writes none, and RT64 elsewhere ends the pass for each decal that follows
+// a draw that wrote depth and begins it again after: Banjo-Tooie ~25 times a frame, each pass ~70 us of Firefox's GPU
+// process. The decal check, |pixel - surface| <= max(CoplanarDepthTolerance(surface), dz), is two depth tests against
+// the surface's depth instead, in two draws with the stencil between them (RasterShader::createPipeline()): the first
+// writes the highest surface depth that passes (decalDepthHigh, greater-equal) and marks the pixels, the second the
+// lowest (less-equal), drawn where a mark is, which it takes back.
+static float decalDepth = 0.0f;
+
+// CoplanarDepthTolerance() is the same over each band of FloatToFixedDepth()'s exponent (0, 1, 2, 3 and more), so a
+// side's bound is the farthest one of the bands gives. Two depth tests pass one interval, and the check can pass two
+// pieces: within 0.0005 of where a band starts, a surface in the band below passes with its wider tolerance
+// while one in the pixel's own band just past its narrower one doesn't, and the interval draws there too.
+float decalDepthBound(float pixelDepth, float dz, bool high) {
+    // Where the exponent becomes 1, 2 and 3: FloatToFixedDepth() rounds, so half a step below 0x20000, 0x30000, 0x38000.
+    const float bandStart[4] = { 0.0f, 131071.5f / 262143.0f, 196607.5f / 262143.0f, 229375.5f / 262143.0f };
+    float bound = high ? (pixelDepth + dz) : (pixelDepth - dz);
+    for (uint e = 0; e < 4; e++) {
+        const float tolerance = 0.0005f / float(1U << e);
+        const float start = bandStart[e];
+        const float end = (e < 3) ? bandStart[e + 1] : 2.0f;
+        if (high && (pixelDepth + tolerance >= start)) {
+            // The band's surface depths up to the pixel's plus its tolerance: the last one below the next band at most.
+            bound = max(bound, min(pixelDepth + tolerance, asfloat(asuint(end) - 1U)));
+        }
+        else if (!high && (pixelDepth - tolerance < end)) {
+            bound = min(bound, max(pixelDepth - tolerance, start));
+        }
+    }
+
+    return bound;
+}
+#endif
+
 #if defined(WEBGPU) && defined(PER_DRAW_TEXTURES)
 // Samples texture 0 or 1 (t) as the two blocks below RasterPS's #else do. With mip LOD the tiles are picked per pixel,
 // so each tile's texture slot is a switch anyway (TextureSampler.hlsli), and RasterPS samples both in a loop the shader
@@ -123,11 +158,6 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
     }
 
     if (depthDecal) {
-        // Sample the depth buffer for this pixel to compare for the decal check.
-        int2 pixelPos = floor(vertexPosition.xy);
-        uint sampleCount = 1U << renderFlagSampleCount(rp.flags);
-        float surfaceDepth = sampleBackgroundDepth(pixelPos, sampleCount);
-
         // Calculate the decal depth tolerance based on the depth derivatives (or the prim dz value if prim depth source is enabled).
         float dz;
         if (zSourcePrim) {
@@ -137,12 +167,22 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
             dz = (abs(ddxDepth) + abs(ddyDepth)) * FbParams.resolutionScale.y;
         }
 
+        const float pixelDepth = select(depthClampNear, max(vertexPosition.z, 0.0f), vertexPosition.z);
+#if defined(DECAL_DEPTH_BOUNDS)
+        // The depth tests do the check (decalDepthBound()).
+        decalDepth = decalDepthBound(pixelDepth, dz, gConstants.decalDepthHigh != 0);
+#else
+        // Sample the depth buffer for this pixel to compare for the decal check.
+        int2 pixelPos = floor(vertexPosition.xy);
+        uint sampleCount = 1U << renderFlagSampleCount(rp.flags);
+        float surfaceDepth = sampleBackgroundDepth(pixelPos, sampleCount);
+
         // Perform the decal depth tolerance check.
         const float DepthTolerance = max(CoplanarDepthTolerance(surfaceDepth), dz);
-        const float pixelDepth = select(depthClampNear, max(vertexPosition.z, 0.0f), vertexPosition.z);
         if (abs(pixelDepth - surfaceDepth) > DepthTolerance) {
             return false;
         }
+#endif
     }
     
     float2 lowResUV = vertexUV;
@@ -383,6 +423,9 @@ void PSMain(
     , [[vk::location(0)]] [[vk::index(0)]] out float4 pixelColor : SV_TARGET0
     , [[vk::location(0)]] [[vk::index(1)]] out float4 pixelAlpha : SV_TARGET1
 #endif
+#if defined(DECAL_DEPTH_BOUNDS)
+    , out float pixelDepth : SV_Depth
+#endif
 )
 {
 #if !defined(DYNAMIC_RENDER_PARAMS)
@@ -399,6 +442,9 @@ void PSMain(
     }
 
     pixelColor = resultColor;
+#if defined(DECAL_DEPTH_BOUNDS)
+    pixelDepth = decalDepth;
+#endif
 #if !defined(WEBGPU) || defined(DUAL_SOURCE_BLENDING)
     pixelAlpha = resultAlpha;
 #endif

@@ -5,6 +5,7 @@
 #include "rt64_raster_shader_cache.h"
 
 #include "common/rt64_thread.h"
+#include "rt64_render_target.h"
 
 #if defined(__EMSCRIPTEN__)
 #   include <emscripten/emscripten.h>
@@ -519,18 +520,17 @@ namespace RT64 {
 
             lock.unlock();
 
-            ShaderDescription desc;
+            ShaderDescription desc = (index < RT64PrebuiltShaderCount) ? prebuiltDescription(RT64PrebuiltShaderList[index]) : prebuildLearned[index - RT64PrebuiltShaderCount];
             std::unique_ptr<RasterShader> shader;
-            if (index < RT64PrebuiltShaderCount) {
+            const bool decalStencil = (RenderTarget::depthBufferFormat() == RenderFormat::D32_FLOAT_S8_UINT);
+            if ((index < RT64PrebuiltShaderCount) && (decalStencil || !RasterShader::prebuiltDecalStencil(desc))) {
                 const RT64PrebuiltShader &entry = RT64PrebuiltShaderList[index];
-                desc = prebuiltDescription(entry);
                 const char *text = prebuildText.data();
                 const uint32_t pixelOffset = dualSource ? entry.pixelOffset : entry.pixelSingleOffset;
                 shader = std::make_unique<RasterShader>(device, desc, shaderUber->pipelineLayout.get(), multisampling,
                     text + entry.vertexOffset, entry.vertexSize, text + pixelOffset, prebuiltPixelSize(entry, dualSource));
             }
             else {
-                desc = prebuildLearned[index - RT64PrebuiltShaderCount];
                 shader = std::make_unique<RasterShader>(device, desc, shaderUber->pipelineLayout.get(), shaderFormat, multisampling,
                     shaderCompiler.get(), &optimizerCacheSPIRV, &shaderCacheWGSL);
             }

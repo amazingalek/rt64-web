@@ -11,8 +11,10 @@ namespace interop {
 #endif
     struct RasterParams {
         uint renderIndex;
-        // Three words, not a uint3: WGSL starts a vec3 on 16 bytes, which would move what follows it.
-        uint padding0;
+        // Which of its two depth bounds a decal's prebuilt pixel shader writes on WebGPU, 1 the high one and 0 the low
+        // one (RasterPS.hlsl, DECAL_DEPTH_BOUNDS); nothing else reads it.
+        uint decalDepthHigh;
+        // Two words, not a uint2 after decalDepthHigh: WGSL starts a vector on 8 bytes, which would move what follows.
         uint padding1;
         uint padding2;
         float2 screenScale;

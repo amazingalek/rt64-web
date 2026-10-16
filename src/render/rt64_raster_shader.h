@@ -51,6 +51,13 @@ namespace RT64 {
         const RenderShader *get(RenderDevice *device, const void *blob, uint64_t size, const char *entryPointName);
     };
 
+    // A prebuilt decal's two draws on WebGPU (RasterShader::createPipeline()).
+    enum class DecalStencil {
+        None,
+        Mark,
+        Draw
+    };
+
     struct PipelineCreation {
         RenderDevice *device;
         const RenderPipelineLayout *pipelineLayout;
@@ -66,6 +73,7 @@ namespace RT64 {
         std::vector<RenderSpecConstant> specConstants;
         RenderMultisampling multisampling;
         bool buildInBackground = false;
+        DecalStencil decalStencil = DecalStencil::None;
     };
 
     struct RasterShaderText {
@@ -78,6 +86,11 @@ namespace RT64 {
         RenderDevice *device;
         std::unique_ptr<RenderPipeline> pipeline;
 
+        // A prebuilt decal's pixel shader writes the bounds of the decal check as its depth (RasterPS.hlsl,
+        // DECAL_DEPTH_BOUNDS), and the decal draws twice in the pass that writes depth: with this pipeline and then
+        // with the one above (createPipeline()). Null for every other shader.
+        std::unique_ptr<RenderPipeline> decalMarkPipeline;
+
         RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, 
             const ShaderCompiler *shaderCompiler, const OptimizerCacheSPIRV *optimizerCacheSPIRV, ShaderCacheWGSL *shaderCacheWGSL);
 
@@ -87,7 +100,8 @@ namespace RT64 {
             const char *vertexWGSL, size_t vertexWGSLSize, const char *pixelWGSL, size_t pixelWGSLSize);
 
         ~RasterShader();
-        void createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling);
+        void createPipelineFor(const RenderPipelineLayout *pipelineLayout, const RenderShader *vertexShader, const RenderShader *pixelShader, const std::vector<RenderSpecConstant> &specConstants, const RenderMultisampling &multisampling, bool decalStencil = false);
+        static bool prebuiltDecalStencil(const ShaderDescription &desc);
         static void setPipelineState(const ShaderDescription &desc, PipelineCreation &creation);
         static uint32_t pipelineStateKey(const ShaderDescription &desc);
         static RasterShaderText generateShaderText(const ShaderDescription &desc, bool multisampling);

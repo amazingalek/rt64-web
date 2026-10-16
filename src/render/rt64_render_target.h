@@ -76,6 +76,7 @@ namespace RT64 {
         static hlslpp::float2 computeFixedResolutionScale(uint32_t nativeWidth, hlslpp::float2 resolutionScale);
         static RenderFormat colorBufferFormat(bool usesHDR);
         static RenderFormat depthBufferFormat();
+        static void setDepthBufferFormat(RenderFormat format);
 
         // WebGPU needs every attachment of a render pass to be the same size, where elsewhere a depth target only has to
         // be as big as its color target. Grows the targets of each pair to the bigger of the two until every pair

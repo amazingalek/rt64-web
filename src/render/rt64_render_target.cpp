@@ -109,7 +109,7 @@ namespace RT64 {
         downsampledTextureMultiplier = 0;
         format = depthBufferFormat();
         
-        RenderClearValue clearValue = RenderClearValue::Depth(RenderDepth(), RenderFormat::D32_FLOAT);
+        RenderClearValue clearValue = RenderClearValue::Depth(RenderDepth(), format);
         texture = worker->device->createTexture(RenderTextureDesc::DepthTarget(width, height, format, multisampling, &clearValue));
         textureView = texture->createTextureView(RenderTextureViewDesc::Texture2D(format));
         texture->setName("Render Target Depth #" + std::to_string(addressForName));
@@ -509,8 +509,16 @@ namespace RT64 {
         return usesHDR ? RenderFormat::R16G16B16A16_UNORM : RenderFormat::R8G8B8A8_UNORM;
     }
 
+    // D32_FLOAT, or on WebGPU D32_FLOAT_S8_UINT where the device has it, for the prebuilt decals' stencil
+    // (RasterShader::createPipeline()). Set once, before anything is made with it.
+    static RenderFormat depthFormat = RenderFormat::D32_FLOAT;
+
     RenderFormat RenderTarget::depthBufferFormat() {
-        return RenderFormat::D32_FLOAT;
+        return depthFormat;
+    }
+
+    void RenderTarget::setDepthBufferFormat(RenderFormat format) {
+        depthFormat = format;
     }
 
     void RenderTarget::matchColorToDepthTargets(RenderWorker *worker, const std::vector<std::pair<RenderTarget *, RenderTarget *>> &colorDepthPairs, std::unordered_set<RenderTarget *> &resizedTargets) {

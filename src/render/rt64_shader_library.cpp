@@ -876,7 +876,7 @@ namespace RT64 {
             pipelineDesc.depthEnabled = true;
             pipelineDesc.depthFunction = RenderComparisonFunction::ALWAYS;
             pipelineDesc.depthWriteEnabled = true;
-            pipelineDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
+            pipelineDesc.depthTargetFormat = RenderTarget::depthBufferFormat();
             fbChangesDrawDepth.pipeline = device->createGraphicsPipeline(pipelineDesc);
         }
 
@@ -913,7 +913,7 @@ namespace RT64 {
             pipelineDesc.depthEnabled = true;
             pipelineDesc.depthFunction = RenderComparisonFunction::ALWAYS;
             pipelineDesc.depthWriteEnabled = true;
-            pipelineDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
+            pipelineDesc.depthTargetFormat = RenderTarget::depthBufferFormat();
             pipelineDesc.pipelineLayout = rtCopyColorToDepth.pipelineLayout.get();
             pipelineDesc.pixelShader = colorToDepthShader.get();
             pipelineDesc.multisampling = RenderMultisampling();
