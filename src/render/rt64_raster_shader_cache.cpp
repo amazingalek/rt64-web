@@ -216,7 +216,7 @@ namespace RT64 {
     // ubershader meanwhile: a wait for one shader would cost more than it saves.
     //
     // Where pipelines build in the background (Chrome), the game waits only for what a frame wants. One thread builds
-    // the whole list behind the game from its first draw (prebuildAhead), a section at a time in the list's order, the
+    // the whole list behind the game from the first draw (prebuildAhead), a section at a time in the list's order, the
     // order the recording reached them in; a round moves the rest of its section to the front, and strays go before
     // that. Section 0, the boot, has only a few seconds of logos before the game wants the rest, and section 1 is
     // usually what follows it by itself or a press of Start later (the attract demo, the menus), so half the threads
@@ -230,7 +230,8 @@ namespace RT64 {
     // every shader of its section not yet built, and the game waits for strays too.
     //
     // A pipeline is built for the WebGPU layout a draw with its pipeline layout resolved (plume_webgpu.h), so section 0
-    // waits for the first frame's draws. A round is built on as many threads as the host has cores (2-16), since the
+    // waits for the first frame's draws; where pipelines build in the background (Chrome) that is the draw of nothing
+    // at setup (State::warmUpPipelines()), and the list builds behind the launcher. A round is built on as many threads as the host has cores (2-16), since the
     // game waits and the browser's GPU process has nothing else to do, largest first: a shader's WGSL size goes with
     // its build time, and the largest (370 KB against a median of 65 KB) started last would leave the other threads idle
     // while it finished. Rush 2049's 105 took 15.6-16.7 s six at a time in the list's order, and 6.9-7.2 s twelve at a

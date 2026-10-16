@@ -935,6 +935,7 @@ namespace RT64 {
         // Copy the current state's extended parameters into the workload.
         workload.extended.ditherNoiseStrength = extended.ditherNoiseStrength;
         workload.extended.texcoordWrapPoint = extended.texcoordWrapPoint;
+        workload.extended.pipelineWarmUp = extended.pipelineWarmUp;
 
         auto emitTileWarning = [&](CommandWarning warning, size_t tileIndex) {
             warning.indexType = CommandWarning::IndexType::TileIndex;
@@ -1229,7 +1230,8 @@ namespace RT64 {
 
                     // Submit the shader to the cache so compilation can start right away.
                     // Ignore any calls that use fill type, as they're emulated without using a shader.
-                    if (callDesc.otherMode.cycleType() != G_CYC_FILL) {
+                    // A pipeline warm-up's draw is the game's no more than its shader is (warmUpPipelines()).
+                    if ((callDesc.otherMode.cycleType() != G_CYC_FILL) && !extended.pipelineWarmUp) {
                         ext.rasterShaderCache->submit(shaderDesc);
                     }
 
@@ -2892,6 +2894,25 @@ namespace RT64 {
 
     void State::setRenderToRAM(uint8_t renderToRAM) {
         extended.renderToRAM = renderToRAM;
+    }
+
+    // A list that draws a rect with the ubershader through the renderer, but none of its triangles (drawsNothing), and
+    // copies nothing to RAM: on WebGPU the draw of nothing resolves the layout of the sets the renderer draws with, which
+    // starts the pipelines made for it in the background (plume's WebGPUGraphicsPipeline), where the device builds them
+    // there. Done at setup, the ubershader's pipelines (one per depth and coverage state) are built behind the launcher;
+    // otherwise the game's first frame resolved the layout and built each state it drew in line, which in Chrome held the
+    // page's presents for as long (1.4-2.0 s for Banjo's four). The prebuilt list's pipelines wait for that layout too,
+    // so they build behind the launcher as well. Its draw asks the shader cache for no shader (fullSync()).
+    void State::warmUpPipelines() {
+        listProcessBegin();
+        rdp->setColorImage(G_IM_FMT_RGBA, G_IM_SIZ_16b, 320, 0x700000);
+        rdp->setOtherMode(G_CYC_1CYCLE, 0);
+        rdp->setScissor(0, 0, 0, 320 << 2, 240 << 2);
+        rdp->fillRect(0, 0, 16 << 2, 16 << 2);
+        setRenderToRAM(0);
+        extended.pipelineWarmUp = true;
+        fullSync();
+        listProcessEnd();
     }
 
     void State::setDitherNoiseStrength(float noiseStrength) {

@@ -242,6 +242,7 @@ namespace RT64 {
             uint32_t testZIndexCount = 0;
             float ditherNoiseStrength = 1.0f;
             hlslpp::float2 texcoordWrapPoint = {};
+            bool pipelineWarmUp = false;
         } extended;
 
         void reset();

@@ -649,7 +649,8 @@ namespace RT64 {
                     drawParams.rtEnabled = workloadConfig.raytracingEnabled;
                     drawParams.submissionFrame = workload.submissionFrame;
                     drawParams.deltaTimeMs = deltaTimeMs;
-                    drawParams.ubershadersOnly = ubershadersOnly;
+                    drawParams.ubershadersOnly = ubershadersOnly || workload.extended.pipelineWarmUp;
+                    drawParams.drawsNothing = workload.extended.pipelineWarmUp;
                     drawParams.postBlendNoise = workloadConfig.postBlendNoise;
                     drawParams.postBlendNoiseNegative = workloadConfig.postBlendNoiseNegative;
                     drawParams.maxGameCall = std::min(gameCallCountMax - gameCallCursor, fbPair.gameCallCount);

@@ -179,6 +179,7 @@ namespace RT64 {
             uint64_t submissionFrame;
             float deltaTimeMs;
             bool ubershadersOnly;
+            bool drawsNothing = false; // Every draw of no triangles (State::warmUpPipelines()).
             bool postBlendNoise;
             bool postBlendNoiseNegative;
             uint32_t maxGameCall;

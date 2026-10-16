@@ -22,6 +22,7 @@ namespace RT64 {
         workloadId = 0;
         extended.testZIndexCount = 0;
         extended.ditherNoiseStrength = 1.0f;
+        extended.pipelineWarmUp = false;
 
         commandWarnings.clear();
         spriteCommands.clear();

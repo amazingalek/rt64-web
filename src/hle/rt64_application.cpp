@@ -495,6 +495,13 @@ namespace RT64 {
         // Set up the RDP
         state->rdp->setGBI();
 
+#   if defined(__EMSCRIPTEN__)
+        // Where pipelines build in the background (Chrome), the ubershader's are built before the game draws with them.
+        if (device->getCapabilities().backgroundPipelineBuilds) {
+            state->warmUpPipelines();
+        }
+#   endif
+
         return SetupResult::Success;
     }
 

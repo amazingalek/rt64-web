@@ -151,6 +151,7 @@ namespace RT64 {
             bool vertexTestZActive = false;
             float ditherNoiseStrength = 1.0f;
             bool extendRDRAM = false;
+            bool pipelineWarmUp = false;
         };
 
         Extended extended;
@@ -186,6 +187,7 @@ namespace RT64 {
         DisplayList *popReturnAddress();
         void setRefreshRate(uint16_t refreshRate);
         void setRenderToRAM(uint8_t renderToRAM);
+        void warmUpPipelines();
         void setDitherNoiseStrength(float noiseStrength);
         void setExtendedRDRAM(bool isExtended);
         void setTexcoordWrapPoint(int16_t wrapU, int16_t wrapV);

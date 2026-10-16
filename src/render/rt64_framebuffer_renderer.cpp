@@ -1691,7 +1691,7 @@ namespace RT64 {
                                 (call.shaderDesc.otherMode.cvgDst() == CVG_DST_WRAP) || (call.shaderDesc.otherMode.cvgDst() == CVG_DST_SAVE));
                         }
                         
-                        triangles.faceCount = call.callDesc.triangleCount;
+                        triangles.faceCount = p.drawsNothing ? 0 : call.callDesc.triangleCount;
                         triangles.vertexTestZ = (vertexTestZCallIndex >= 0);
                         triangles.postBlendDitherNoise = false;
 
