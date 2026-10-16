@@ -28,6 +28,11 @@ namespace RT64 {
             uint8_t nativeBufferViewFormat = 0;
             uint8_t nativeBufferNextViewFormat = 0;
             uint8_t nativeBufferWriteViewFormat = 0;
+#       if defined(__EMSCRIPTEN__)
+            // What copyFromRAM last uploaded to nativeBuffer, while nothing else has written to it since.
+            std::vector<uint8_t> uploadedData;
+            bool uploadedDataValid = false;
+#       endif
         };
 
         struct WriteBuffer {

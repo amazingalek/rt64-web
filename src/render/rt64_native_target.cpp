@@ -13,6 +13,21 @@
 #include "rt64_render_worker.h"
 
 namespace RT64 {
+#if defined(__EMSCRIPTEN__)
+    template<typename T>
+    static uint32_t countDifferent(const uint8_t *a, const uint8_t *b, uint32_t count) {
+        uint32_t different = 0;
+        for (uint32_t i = 0; i < count; i++) {
+            T x, y;
+            memcpy(&x, a + i * sizeof(T), sizeof(T));
+            memcpy(&y, b + i * sizeof(T), sizeof(T));
+            different += (x != y) ? 1 : 0;
+        }
+
+        return different;
+    }
+#endif
+
     // NativeTarget
 
     NativeTarget::NativeTarget() { }
@@ -37,6 +52,9 @@ namespace RT64 {
         readBuffer.nativeUploadBuffer.reset();
         readBuffer.nativeBuffer = worker->device->createBuffer(RenderBufferDesc::DefaultBuffer(bufferSize, RenderBufferFlag::STORAGE | RenderBufferFlag::UNORDERED_ACCESS | RenderBufferFlag::FORMATTED));
         readBuffer.nativeBufferSize = bufferSize;
+#   if defined(__EMSCRIPTEN__)
+        readBuffer.uploadedDataValid = false;
+#   endif
     }
 
     RenderFormat NativeTarget::getBufferFormat(uint8_t siz) const {
@@ -138,7 +156,35 @@ namespace RT64 {
         memcpy(dstData, data, bufferSize);
         readBuffer.nativeUploadBuffer->unmap();
 
-        if (hasCurrentResource) {
+        // On WebGPU, reading the count back makes the list wait for the GPU and the page's thread (10-90 ms on the
+        // first list of a new screen). When the previous buffer still holds what the CPU uploaded to it, count the
+        // pixels that differ from it here instead, the same count FbReadAnyChangesCS makes.
+        bool countOnGPU = hasCurrentResource;
+        uint32_t modifiedCount = 0;
+#   if defined(__EMSCRIPTEN__)
+        if (hasCurrentResource && previousReadBuffer->uploadedDataValid && (previousReadBuffer->uploadedData.size() >= bufferSize)) {
+            const uint32_t pixelCount = width * height;
+            const uint8_t *previousData = previousReadBuffer->uploadedData.data();
+            switch (siz) {
+            case G_IM_SIZ_32b:
+                modifiedCount = countDifferent<uint32_t>(data, previousData, pixelCount);
+                break;
+            case G_IM_SIZ_16b:
+                modifiedCount = countDifferent<uint16_t>(data, previousData, pixelCount);
+                break;
+            default:
+                modifiedCount = countDifferent<uint8_t>(data, previousData, pixelCount);
+                break;
+            }
+
+            countOnGPU = false;
+        }
+
+        readBuffer.uploadedData.assign(data, data + bufferSize);
+        readBuffer.uploadedDataValid = true;
+#   endif
+
+        if (countOnGPU) {
             // Clear the change count resource with a compute shader.
             worker->commandList->barriers(RenderBarrierStage::COMPUTE, RenderBufferBarrier(changeCountBuffer.get(), RenderBufferAccess::WRITE));
             worker->commandList->setPipeline(shaderLibrary->fbChangesClear.pipeline.get());
@@ -200,7 +246,7 @@ namespace RT64 {
         worker->commandList->dispatch(dispatchX, dispatchY, 1);
         worker->commandList->barriers(RenderBarrierStage::ALL, afterBarriers, uint32_t(std::size(afterBarriers)));
 
-        if (hasCurrentResource) {
+        if (countOnGPU) {
             // Copy the modified count resource to the readback.
             RenderBufferBarrier beforeCopyBarriers[] = {
                 RenderBufferBarrier(changeCountBuffer.get(), RenderBufferAccess::READ),
@@ -212,8 +258,7 @@ namespace RT64 {
         }
         
         // Read the modified count by executing and waiting.
-        uint32_t modifiedCount = 0;
-        if (hasCurrentResource) {
+        if (countOnGPU) {
             worker->commandList->end();
             worker->execute();
             worker->wait();
@@ -224,7 +269,7 @@ namespace RT64 {
             changeReadbackBuffer->unmap();
         }
         // Consider all pixels as modified.
-        else {
+        else if (!hasCurrentResource) {
             modifiedCount = width * height;
         }
 
@@ -319,6 +364,9 @@ namespace RT64 {
         }
 
         writeBuffer.writeDescSet->setBuffer(writeBuffer.writeDescSet->gOutput, readBuffer->nativeBuffer.get(), bufferSize, readBuffer->nativeBufferWriteView.get());
+#   if defined(__EMSCRIPTEN__)
+        readBuffer->uploadedDataValid = false;
+#   endif
 
         if (smallerReadBuffer != nullptr) {
             RenderBufferBarrier copyBarriers[] = {
