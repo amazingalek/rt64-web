@@ -415,13 +415,16 @@ namespace RT64 {
                     // to the page's thread) isn't added to every period. In Chrome the pages of games below the
                     // display's rate presented every 18 ms, 55.6 a second, where those at its rate, which never sleep
                     // here, presented 60. A present a whole period past its slot or more starts the slots from itself.
+                    // Where the swap chain learns of the display's frames as they come (WebGPU), the wait ends on one.
                     const auto presentPeriod = std::chrono::nanoseconds(1'000'000'000 / targetRate);
                     if ((presentSlot == Timestamp()) || ((presentTimestamp - presentSlot) >= presentPeriod)) {
                         presentSlot = presentTimestamp;
                     }
 
                     presentSlot += presentPeriod;
-                    Timer::preciseSleepUntil(presentSlot);
+                    if (!ext.swapChain->sleepUntil(std::chrono::steady_clock::now() + (presentSlot - Timer::current()))) {
+                        Timer::preciseSleepUntil(presentSlot);
+                    }
 #               else
                     Timer::preciseSleepUntil(presentTimestamp + std::chrono::nanoseconds(1'000'000'000 / targetRate));
 #               endif
