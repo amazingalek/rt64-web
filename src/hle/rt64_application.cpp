@@ -314,6 +314,14 @@ namespace RT64 {
             break;
         }
 
+#   if defined(RT64_WGSL)
+        // A depth target with a stencil, for the prebuilt decals (RasterShader::createPipeline()), where the device has
+        // depth32float-stencil8, an optional feature of WebGPU.
+        if (device->getSampleCountsSupported(RenderFormat::D32_FLOAT_S8_UINT) & RenderSampleCount::COUNT_1) {
+            RenderTarget::setDepthBufferFormat(RenderFormat::D32_FLOAT_S8_UINT);
+        }
+#   endif
+
         // Call the init hook if one was attached.
         RenderHookInit *initHook = GetRenderHookInit();
         if (initHook != nullptr) {
@@ -352,14 +360,6 @@ namespace RT64 {
         }
 
         swapChain = presentGraphicsWorker->commandQueue->createSwapChain(swapChainDesc);
-
-#   if defined(RT64_WGSL)
-        // A depth target with a stencil, for the prebuilt decals (RasterShader::createPipeline()), where the device has
-        // depth32float-stencil8, an optional feature of WebGPU.
-        if (device->getSampleCountsSupported(RenderFormat::D32_FLOAT_S8_UINT) & RenderSampleCount::COUNT_1) {
-            RenderTarget::setDepthBufferFormat(RenderFormat::D32_FLOAT_S8_UINT);
-        }
-#   endif
 
         // Before configuring multisampling, make sure the device actually supports it for the formats we'll use. If it doesn't, turn off antialiasing in the configuration.
         const RenderSampleCounts colorSampleCounts = device->getSampleCountsSupported(RenderTarget::colorBufferFormat(usesHDR));

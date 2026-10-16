@@ -51,8 +51,8 @@ float sampleBackgroundDepth(int2 pixelPos, uint sampleCount) {
 // a draw that wrote depth and begins it again after: Banjo-Tooie ~25 times a frame, each pass ~70 us of Firefox's GPU
 // process. The decal check, |pixel - surface| <= max(CoplanarDepthTolerance(surface), dz), is two depth tests against
 // the surface's depth instead, in two draws with the stencil between them (RasterShader::createPipeline()): the first
-// writes the highest surface depth that passes (decalDepthHigh, greater-equal) and marks the pixels, the second the
-// lowest (less-equal), drawn where a mark is, which it takes back.
+// writes the highest surface depth that passes (greater-equal; RasterParams' padding0 is 1 for it) and marks the
+// pixels, the second the lowest (less-equal), drawn where a mark is, which it takes back.
 static float decalDepth = 0.0f;
 
 // CoplanarDepthTolerance() is the same over each band of FloatToFixedDepth()'s exponent (0, 1, 2, 3 and more), so a
@@ -170,7 +170,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         const float pixelDepth = select(depthClampNear, max(vertexPosition.z, 0.0f), vertexPosition.z);
 #if defined(DECAL_DEPTH_BOUNDS)
         // The depth tests do the check (decalDepthBound()).
-        decalDepth = decalDepthBound(pixelDepth, dz, gConstants.decalDepthHigh != 0);
+        decalDepth = decalDepthBound(pixelDepth, dz, gConstants.padding0 != 0);
 #else
         // Sample the depth buffer for this pixel to compare for the decal check.
         int2 pixelPos = floor(vertexPosition.xy);

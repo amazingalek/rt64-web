@@ -1918,24 +1918,6 @@ namespace RT64 {
             }
         }
         
-        // Whether the workload draws to any framebuffer the VI has shown lately.
-        bool viShowsAny = false;
-        bool drawsShown = false;
-        for (const VIHistory::Present &entry : viHistory.history) {
-            if (!entry.vi.visible()) {
-                continue;
-            }
-
-            viShowsAny = true;
-            for (uint32_t f = 0; (f < workload.fbPairCount) && !drawsShown; f++) {
-                const FramebufferPair &fbPair = workload.fbPairs[f];
-                drawsShown = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == entry.vi.fbAddress()) &&
-                    (fbPair.colorImage.width == entry.vi.fbSize().x) && (fbPair.colorImage.siz == entry.vi.fbSiz());
-            }
-        }
-
-        workload.offscreenOnly = viShowsAny && (workload.fbPairCount > 0) && !drawsShown;
-
         // Advance the workload queue at the end of a full synchronization.
         advanceWorkload(workload, false);
         ext.workloadQueue->advanceToNextWorkload();
@@ -2827,6 +2809,27 @@ namespace RT64 {
         workload.debuggerCamera = debuggerInspector.camera;
         workload.debuggerRenderer = debuggerInspector.renderer;
         workload.paused = paused;
+
+        // Whether the workload draws to any framebuffer the VI has shown lately, for a workload a full sync ends. It's
+        // worked out here, not where fullSync() ends, which the games' own patches of RT64 add to.
+        if (!paused) {
+            bool viShowsAny = false;
+            bool drawsShown = false;
+            for (const VIHistory::Present &entry : viHistory.history) {
+                if (!entry.vi.visible()) {
+                    continue;
+                }
+
+                viShowsAny = true;
+                for (uint32_t f = 0; (f < workload.fbPairCount) && !drawsShown; f++) {
+                    const FramebufferPair &fbPair = workload.fbPairs[f];
+                    drawsShown = !fbPair.drawColorRect.isEmpty() && (fbPair.colorImage.address == entry.vi.fbAddress()) &&
+                        (fbPair.colorImage.width == entry.vi.fbSize().x) && (fbPair.colorImage.siz == entry.vi.fbSiz());
+                }
+            }
+
+            workload.offscreenOnly = viShowsAny && (workload.fbPairCount > 0) && !drawsShown;
+        }
     }
 
     void State::advancePresent(Present &present, bool paused) {

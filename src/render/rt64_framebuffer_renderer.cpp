@@ -499,7 +499,7 @@ namespace RT64 {
         bool previousVertexTestZ = false;
         const RenderPipeline *previousPipeline = nullptr;
         RenderRect previousScissor;
-        interop::RasterParams rasterParams = {};
+        interop::RasterParams rasterParams;
         RenderDescriptorSet *descRealFbSet = framebuffer.descRealFbSet->get();
         RenderDescriptorSet *descDummyFbSet = framebuffer.descDummyFbSet->get();
         const RenderDescriptorSet *previousDrawTextureSet = nullptr;
@@ -622,14 +622,14 @@ namespace RT64 {
                 rasterParams.screenOffset = triangles.screenOffset;
 
                 // A prebuilt decal's first draw marks the stencil where the surface is no deeper than its high bound
-                // (RasterShader::createPipeline()).
+                // (RasterShader::createPipeline()), padding0 1 for it: nothing else reads padding0 in a raster draw.
                 if (triangles.decalMarkPipeline != nullptr) {
                     worker->commandList->setPipeline(triangles.decalMarkPipeline);
-                    rasterParams.decalDepthHigh = 1;
+                    rasterParams.padding0 = 1;
                     worker->commandList->setGraphicsPushConstants(0, &rasterParams);
                     drawCallTriangles(drawCall);
                     worker->commandList->setPipeline(triangles.pipeline);
-                    rasterParams.decalDepthHigh = 0;
+                    rasterParams.padding0 = 0;
                 }
 
                 worker->commandList->setGraphicsPushConstants(0, &rasterParams);

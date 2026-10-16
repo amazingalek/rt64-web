@@ -5,7 +5,6 @@
 #include "rt64_raster_shader_cache.h"
 
 #include "common/rt64_thread.h"
-#include "rt64_render_target.h"
 
 #if defined(__EMSCRIPTEN__)
 #   include <emscripten/emscripten.h>
@@ -16,6 +15,7 @@
 #   include <zstd.h>
 #   include "common/rt64_elapsed_timer.h"
 #   include "rt64_prebuilt_shaders.h"
+#   include "rt64_render_target.h"
 
 // The size of the pixel shader built for a prebuilt shader, on a device with dual-source blending or without.
 static uint32_t prebuiltPixelSize(const RT64PrebuiltShader &entry, bool dualSource) {
