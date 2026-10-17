@@ -18,7 +18,9 @@
 // We prefer using for loops to reduce the size of the final ubershader as much as possible.
 // When using specialized shaders, we prefer to unroll the loop manually to give re-spirv an
 // easier time to eliminate dead code, as its graph model can't handle the loop constructs yet.
-#ifdef DYNAMIC_RENDER_PARAMS
+// A WGSL build's spec constant shaders, which the browser specializes with override values and nothing strips of dead
+// code beforehand, keep the loops too (SPEC_CONSTANT_LOOPS, CMakeLists.txt).
+#if defined(DYNAMIC_RENDER_PARAMS) || defined(SPEC_CONSTANT_LOOPS)
 #define USE_FOR_LOOPS 1
 #else
 #define USE_FOR_LOOPS 0

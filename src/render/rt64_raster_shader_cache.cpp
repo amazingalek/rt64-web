@@ -186,13 +186,11 @@ namespace RT64 {
         // Create the spec constant shaders before anything draws. plume's WebGPU backend learns from each new shader which
         // stages read which bindings, and when that changes every pipeline gets a new layout: the specialized ones that
         // were drawn with would then be built again in place, holding up the browser's GPU process for seconds. Without
-        // specialized or prebuilt shaders nothing needs them, and each is megabytes of WGSL for the browser to parse.
+        // specialized or prebuilt shaders nothing needs them, and RasterPS is 250 KB of WGSL for the browser to parse.
         if ((shaderFormat == RenderShaderFormat::WGSL) && (specializedShaders || prebuiltShaders)) {
             const RenderShader *vertexShader = nullptr;
             const RenderShader *pixelShader = nullptr;
-            for (bool smoothShade : { false, true }) {
-                shaderCacheWGSL.get(device, smoothShade, multisampling.sampleCount > 1, vertexShader, pixelShader);
-            }
+            shaderCacheWGSL.get(device, multisampling.sampleCount > 1, vertexShader, pixelShader);
         }
 
         startPrebuild();

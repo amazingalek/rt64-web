@@ -41,13 +41,13 @@ namespace RT64 {
     };
 
     // The spec constant shaders a WGSL build specializes with override values, each created once: they are the same
-    // source for every shader, and creating a RasterPS module (over 1 MB of WGSL) costs the browser a parse each time.
+    // source for every shader, and creating a RasterPS module (250 KB of WGSL) costs the browser a parse each time.
     struct ShaderCacheWGSL {
         std::mutex mutex;
         std::unordered_map<const void *, std::unique_ptr<RenderShader>> shaders;
 
-        // The vertex and pixel shader for a shading mode, created on first use.
-        void get(RenderDevice *device, bool smoothShade, bool useMSAA, const RenderShader *&vertexShader, const RenderShader *&pixelShader);
+        // The vertex and pixel shader every shader specializes, created on first use.
+        void get(RenderDevice *device, bool useMSAA, const RenderShader *&vertexShader, const RenderShader *&pixelShader);
         const RenderShader *get(RenderDevice *device, const void *blob, uint64_t size, const char *entryPointName);
     };
 

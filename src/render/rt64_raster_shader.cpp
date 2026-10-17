@@ -10,22 +10,17 @@
 #if defined(RT64_WGSL)
 #   include "shaders/RasterPSDynamic.hlsl.wgsl.h"
 #   include "shaders/RasterPSDynamicMS.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstant.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstantMS.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstantFlat.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstantFlatMS.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlatLoops.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlatLoopsMS.hlsl.wgsl.h"
 #   include "shaders/RasterVSDynamic.hlsl.wgsl.h"
-#   include "shaders/RasterVSSpecConstant.hlsl.wgsl.h"
 #   include "shaders/RasterVSSpecConstantFlat.hlsl.wgsl.h"
 #   include "shaders/PostBlendDitherNoiseAddPS.hlsl.wgsl.h"
 #   include "shaders/PostBlendDitherNoiseSubPS.hlsl.wgsl.h"
 #   include "shaders/PostBlendDitherNoiseSubNegativePS.hlsl.wgsl.h"
 #   include "shaders/RasterPSDynamicDualSource.hlsl.wgsl.h"
 #   include "shaders/RasterPSDynamicMSDualSource.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstantDualSource.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstantMSDualSource.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstantFlatDualSource.hlsl.wgsl.h"
-#   include "shaders/RasterPSSpecConstantFlatMSDualSource.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlatLoopsDualSource.hlsl.wgsl.h"
+#   include "shaders/RasterPSSpecConstantFlatLoopsMSDualSource.hlsl.wgsl.h"
 #else
 #   include "shaders/RasterPSDynamic.hlsl.spirv.h"
 #   include "shaders/RasterPSDynamicMS.hlsl.spirv.h"
@@ -135,36 +130,25 @@ namespace RT64 {
         return shader.get();
     }
 
-    void ShaderCacheWGSL::get(RenderDevice *device, bool smoothShade, bool useMSAA, const RenderShader *&vertexShader, const RenderShader *&pixelShader) {
+    void ShaderCacheWGSL::get(RenderDevice *device, bool useMSAA, const RenderShader *&vertexShader, const RenderShader *&pixelShader) {
 #   if defined(RT64_WGSL)
-        // RasterPS writes the blend factor to a second output only where the device has dual-source blending
+        // Every shading mode draws with the flat ones: the mode is a spec constant too (rpFlagsValue), and a smooth
+        // shader never reads the flat color it is given (RasterPS() picks the smooth one), so the smooth pair would be
+        // the same shader again. Chrome parses each module on its GPU main thread, where every present waits behind it:
+        // the smooth RasterPS was ~0.9 s of the launcher's first frames (GoldenEye, Chrome 155, RTX 2070). RasterPS is the
+        // one with the ubershader's loops (CMakeLists.txt, SPEC_CONSTANT_LOOPS), and writes the blend factor to a second output only where the device has dual-source blending
         // (RasterShader::createPipeline).
         const bool dualSource = device->getCapabilities().dualSourceBlending;
-        if (smoothShade) {
-            vertexShader = get(device, RasterVSSpecConstantBlobWGSL, sizeof(RasterVSSpecConstantBlobWGSL), "VSMain");
-            if (useMSAA) {
-                pixelShader = dualSource ?
-                    get(device, RasterPSSpecConstantMSDualSourceBlobWGSL, sizeof(RasterPSSpecConstantMSDualSourceBlobWGSL), "PSMain") :
-                    get(device, RasterPSSpecConstantMSBlobWGSL, sizeof(RasterPSSpecConstantMSBlobWGSL), "PSMain");
-            }
-            else {
-                pixelShader = dualSource ?
-                    get(device, RasterPSSpecConstantDualSourceBlobWGSL, sizeof(RasterPSSpecConstantDualSourceBlobWGSL), "PSMain") :
-                    get(device, RasterPSSpecConstantBlobWGSL, sizeof(RasterPSSpecConstantBlobWGSL), "PSMain");
-            }
+        vertexShader = get(device, RasterVSSpecConstantFlatBlobWGSL, sizeof(RasterVSSpecConstantFlatBlobWGSL), "VSMain");
+        if (useMSAA) {
+            pixelShader = dualSource ?
+                get(device, RasterPSSpecConstantFlatLoopsMSDualSourceBlobWGSL, sizeof(RasterPSSpecConstantFlatLoopsMSDualSourceBlobWGSL), "PSMain") :
+                get(device, RasterPSSpecConstantFlatLoopsMSBlobWGSL, sizeof(RasterPSSpecConstantFlatLoopsMSBlobWGSL), "PSMain");
         }
         else {
-            vertexShader = get(device, RasterVSSpecConstantFlatBlobWGSL, sizeof(RasterVSSpecConstantFlatBlobWGSL), "VSMain");
-            if (useMSAA) {
-                pixelShader = dualSource ?
-                    get(device, RasterPSSpecConstantFlatMSDualSourceBlobWGSL, sizeof(RasterPSSpecConstantFlatMSDualSourceBlobWGSL), "PSMain") :
-                    get(device, RasterPSSpecConstantFlatMSBlobWGSL, sizeof(RasterPSSpecConstantFlatMSBlobWGSL), "PSMain");
-            }
-            else {
-                pixelShader = dualSource ?
-                    get(device, RasterPSSpecConstantFlatDualSourceBlobWGSL, sizeof(RasterPSSpecConstantFlatDualSourceBlobWGSL), "PSMain") :
-                    get(device, RasterPSSpecConstantFlatBlobWGSL, sizeof(RasterPSSpecConstantFlatBlobWGSL), "PSMain");
-            }
+            pixelShader = dualSource ?
+                get(device, RasterPSSpecConstantFlatLoopsDualSourceBlobWGSL, sizeof(RasterPSSpecConstantFlatLoopsDualSourceBlobWGSL), "PSMain") :
+                get(device, RasterPSSpecConstantFlatLoopsBlobWGSL, sizeof(RasterPSSpecConstantFlatLoopsBlobWGSL), "PSMain");
         }
 #   else
         assert(false && "This build has no WGSL shaders.");
@@ -192,7 +176,7 @@ namespace RT64 {
         if (shaderFormat == RenderShaderFormat::WGSL) {
 #       if defined(RT64_WGSL)
             // As Metal: the pre-compiled permutation, with the spec constants as the pipeline's override constants.
-            shaderCacheWGSL->get(device, desc.flags.smoothShade, useMSAA, sharedVertexShader, sharedPixelShader);
+            shaderCacheWGSL->get(device, useMSAA, sharedVertexShader, sharedPixelShader);
             specConstants.emplace_back(0, desc.otherMode.L);
             specConstants.emplace_back(1, desc.otherMode.H);
             specConstants.emplace_back(2, desc.colorCombiner.L);

@@ -85,10 +85,11 @@ float decalDepthBound(float pixelDepth, float dz, bool high) {
 // so each tile's texture slot is a switch anyway (TextureSampler.hlsli), and RasterPS samples both in a loop the shader
 // keeps, which leaves sampleTexture() in it once: most of a prebuilt pixel shader with mip LOD. Without LOD a specialized
 // shader knows each tile's slot and clamp modes only if it samples them apart, as two calls (one of Majora's Mask's
-// with two tiles is 10 KB of WGSL that way, 60 in the loop). The ubershader always loops. Firefox 158 builds a section's
-// pipelines one at a time while the game waits, and in a test page built GoldenEye's Dam in 5.8-8.3 s against
-// 14.8-19.1, Pilotwings 64's menus in 5.7-8.2 against 13.9-16.3 and Conker's Windy in 4.1-4.4 against 6.3-8.4 (RTX
-// 2070, three runs each, interleaved, a busy host).
+// with two tiles is 10 KB of WGSL that way, 60 in the loop). The ubershader always loops, and so does the spec constant
+// shader the browser specializes (SPEC_CONSTANT_LOOPS). Firefox 158 builds a section's pipelines one at a time while
+// the game waits, and in a test page built GoldenEye's Dam in 5.8-8.3 s against 14.8-19.1, Pilotwings 64's menus in
+// 5.7-8.2 against 13.9-16.3 and Conker's Windy in 4.1-4.4 against 6.3-8.4 (RTX 2070, three runs each, interleaved, a
+// busy host).
 float4 sampleDrawTile(uint t, OtherMode otherMode, RenderFlags flags, int tileIndex0, int tileIndex1, float2 lowResUV, float2 highResUV, float2 ddxUV, float2 ddyUV) {
     const bool oneCycleHardwareBug = (otherMode.cycleType() == G_CYC_1CYCLE);
     const bool firstTile = (t == 0) || oneCycleHardwareBug;
@@ -220,7 +221,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
     const bool usesTexture0 = renderFlagUsesTexture0(rp.flags);
     const bool usesTexture1 = renderFlagUsesTexture1(rp.flags);
     const bool loopTiles = usesTexture0 && usesTexture1 && (otherMode.textLOD() == G_TL_LOD);
-#if !defined(DYNAMIC_RENDER_PARAMS)
+#if !defined(DYNAMIC_RENDER_PARAMS) && !defined(SPEC_CONSTANT_LOOPS)
     if (!loopTiles) {
         if (usesTexture0) {
             texVal0 = sampleDrawTile(0, otherMode, rp.flags, tileIndex0, tileIndex1, lowResUV, highResUV, ddxVertexUV, ddyVertexUV);
