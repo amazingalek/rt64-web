@@ -500,6 +500,12 @@ namespace RT64 {
         if (device->getCapabilities().backgroundPipelineBuilds) {
             state->warmUpPipelines();
         }
+
+        // Everything setup asks of the device is submitted before this returns and the first screen is presented, which
+        // waits until the browser has done all of it (plume_webgpu.h): the warm-up's compute and render pipelines built
+        // in line in Chrome's GPU process, after the shader modules, held the launcher's presents for as long once its
+        // first frames were shown.
+        workloadQueue->waitForWorkloadId(state->workloadId);
 #   endif
 
         return SetupResult::Success;
