@@ -16,10 +16,24 @@
 namespace RT64 {
     // TextureManager
 
+    // A draw's texture already in the cache is marked as used by the workload being prepared. The texture cache only
+    // learned of a use when the workload was drawn, and the state evicts at the end of each workload it prepares, up
+    // to WORKLOAD_QUEUE_SIZE workloads ahead of the one being drawn: a texture unused for longer than its maximum age
+    // and then drawn again was evicted while a queued workload still drew it, and that draw read texture slot 0,
+    // another texture (a letter of a menu drawn as a piece of another font, flickering while it repeats). Its hash also
+    // left the hash set, so it is uploaded again for the next workload.
+    static void markUsed(TextureCache *textureCache, uint64_t hash, uint64_t submissionFrame) {
+        uint32_t textureIndex;
+        textureCache->useTexture(hash, submissionFrame, textureIndex);
+    }
+
     void TextureManager::uploadEmpty(State *state, TextureCache *textureCache, uint64_t creationFrame, uint16_t width, uint16_t height, uint64_t replacementHash) {
         if (hashSet.find(replacementHash) == hashSet.end()) {
             hashSet.insert(replacementHash);
             textureCache->queueGPUUploadTMEM(replacementHash, creationFrame, nullptr, 0, width, height, 0, LoadTile(), false);
+        }
+        else {
+            markUsed(textureCache, replacementHash, creationFrame);
         }
     }
 
@@ -34,6 +48,9 @@ namespace RT64 {
         if (hashSet.find(hash) == hashSet.end()) {
             hashSet.insert(hash);
             textureCache->queueGPUUploadTMEM(hash, creationFrame, TMEM, RDP_TMEM_BYTES, width, height, 0, LoadTile(), false);
+        }
+        else {
+            markUsed(textureCache, hash, creationFrame);
         }
         
         // Dump memory contents into a file if the process is active.
@@ -55,6 +72,9 @@ namespace RT64 {
         if (hashSet.find(hash) == hashSet.end()) {
             hashSet.insert(hash);
             textureCache->queueGPUUploadTMEM(hash, creationFrame, TMEM, RDP_TMEM_BYTES, width, height, tlut, loadTile, true);
+        }
+        else {
+            markUsed(textureCache, hash, creationFrame);
         }
 
         // Dump memory contents into a file if the process is active.

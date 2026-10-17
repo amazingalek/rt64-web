@@ -313,14 +313,17 @@ namespace RT64 {
             textureDimensions = cachedTextureDimensions[textureIndex];
         }
 
-        // Remove the existing entry from the list if it exists.
+        // Remove the existing entry from the list if it exists. A use is marked twice, when the state prepares the
+        // workload and when the workload is drawn, a few workloads apart, so the entry keeps the later of the two.
+        uint64_t accessFrame = submissionFrame;
         AccessList::iterator listIt = listIterators[textureIndex];
         if (listIt != accessList.end()) {
+            accessFrame = std::max(accessFrame, listIt->second);
             accessList.erase(listIt);
         }
 
         // Push a new access entry to the front of the list and store the new iterator.
-        accessList.push_front({ textureIndex, submissionFrame });
+        accessList.push_front({ textureIndex, accessFrame });
         listIterators[textureIndex] = accessList.begin();
         return true;
     }
