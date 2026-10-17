@@ -37,6 +37,12 @@
 namespace RT64 {
     struct PresentQueue;
 
+#if defined(__EMSCRIPTEN__)
+    // How many color targets a page's interpolated frames take turns in (WorkloadQueue::renderThreadLoop): 8 hold every
+    // interpolated frame of a 7.5 fps game at 60 Hz, and ?uncapped's 360 Hz presents as many with any number.
+    constexpr uint32_t InterpolatedTargetSlots = 8;
+#endif
+
     struct WorkloadQueue {
         struct External {
             RenderDevice *device = nullptr;

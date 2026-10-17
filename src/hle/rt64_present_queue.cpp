@@ -95,8 +95,8 @@ namespace RT64 {
 #   if defined(__EMSCRIPTEN__)
         // A page opened with ?uncapped measures how many presents a second it can make: plume reports the display's rate
         // as the query's (360), the frames are interpolated to it, and none are paced (pace()), so that what the GPU
-        // and the browser can take is what is presented. Each interpolated frame is a color target of the output's size
-        // kept for a game frame: 17 for a 20 fps game at 360, ~530 MB at 3840x2000.
+        // and the browser can take is what is presented. The interpolated frames take turns in 8 color targets of the
+        // game's framebuffer at the output's scale (WorkloadQueue's InterpolatedTargetSlots), 0.25-0.55 GB at 3840x2000.
         uncapped = MAIN_THREAD_EM_ASM_INT({ return new URLSearchParams(location.search).has('uncapped') ? 1 : 0; }) != 0;
 #   endif
 
@@ -305,7 +305,8 @@ namespace RT64 {
 
                 if (i < framesToPresent) {
                     uint32_t targetIndex = usingMSAA ? i : (i - 1);
-                    colorTarget = ext.sharedResources->interpolatedColorTargets[targetIndex].get();
+                    const auto &interpolatedTargets = ext.sharedResources->interpolatedColorTargets;
+                    colorTarget = interpolatedTargets[targetIndex % interpolatedTargets.size()].get();
                 }
                 else {
                     colorTarget = nullptr;

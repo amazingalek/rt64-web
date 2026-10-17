@@ -1087,6 +1087,14 @@ namespace RT64 {
                 const bool usingMSAA = (ext.sharedResources->renderTargetManager.multisampling.sampleCount > 1);
                 const bool usesHDR = ext.sharedResources->renderTargetManager.usesHDR;
                 uint32_t requiredFrames = (usingMSAA && generateInterpolatedFrames) ? displayFrames : (displayFrames - 1);
+#           if defined(__EMSCRIPTEN__)
+                // At most InterpolatedTargetSlots targets, used in turn: a frame past them waits for the frame drawn into its
+                // target to be presented. RT64 keeps a target for every display frame of a game frame and never frees one,
+                // so a page held as many as the slowest game frame of the visit took display frames: GoldenEye's targets
+                // are 5702x2970 (68 MB) at a 3840x2000 canvas, and ?uncapped (360 Hz) in Dam at ~8 fps kept 42 of them,
+                // 2.8 GB, until Firefox's device ran out of memory. At 60 Hz a game frame takes more only below 7.5 fps.
+                requiredFrames = std::min(requiredFrames, InterpolatedTargetSlots);
+#           endif
                 if ((requiredFrames > 0) && (interpolatedTargets.size() < requiredFrames)) {
                     uint32_t previousSize = uint32_t(interpolatedTargets.size());
                     interpolatedTargets.resize(requiredFrames);
@@ -1103,6 +1111,15 @@ namespace RT64 {
                 bool skipWorkloadNow = false;
                 uint32_t targetIndex = 0;
                 uint32_t framesRendered = 0;
+                auto newerWorkloadQueued = [&]() {
+                    std::scoped_lock<std::mutex> cursorLock(cursorMutex);
+                    bool newer = (writeCursor != threadCursor);
+#               if RT64_OFFSCREEN_WORKLOADS
+                    // An offscreen pass alone is the start of the next frame, not the frame: these frames go on.
+                    newer = newer && !(workloads[threadCursor].offscreenOnly && (int((threadCursor + 1) % workloads.size()) == writeCursor));
+#               endif
+                    return newer;
+                };
                 int64_t renderTimeTotalMicro = 0;
                 for (uint32_t frame = 0; (frame < displayFrames) && !skipWorkloadNow; frame++) {
                     // Evaluate if this frame should be skipped. Measure the current time and compare it to what frame is estimated should be have been rendered by now.
@@ -1126,15 +1143,43 @@ namespace RT64 {
 
                         // Override the render target.
                         if (usingMSAA || (frame > 0)) {
-                            overrideTarget = interpolatedTargets[targetIndex].get();
-                            overrideModifier = (targetIndex + 1);
+                            // The targets are used in turn when there are fewer than the frames (InterpolatedTargetSlots).
+                            const uint32_t targetSlots = uint32_t(interpolatedTargets.size());
+                            const uint32_t targetSlot = targetIndex % targetSlots;
+                            overrideTarget = interpolatedTargets[targetSlot].get();
+                            overrideModifier = (targetSlot + 1);
 
-                            if (useDifferentCounters && (prevFrameCounters.available > 0) && (targetIndex < prevFrameCounters.available)) {
+#                       if defined(__EMSCRIPTEN__)
+                            if (targetIndex >= targetSlots) {
+                                // Wait until this workload's own frame drawn into the target has been presented, unless a newer
+                                // workload is waiting: then the rest of this one's frames are skipped, as they are after a frame.
+                                std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
+                                while ((curFrameCounters.presented <= (targetIndex - targetSlots)) && !skipWorkloadNow) {
+                                    ext.sharedResources->interpolatedCondition.wait_for(interpolatedLock, std::chrono::milliseconds(5));
+                                    if (curFrameCounters.presented <= (targetIndex - targetSlots)) {
+                                        interpolatedLock.unlock();
+                                        skipWorkloadNow = newerWorkloadQueued();
+                                        interpolatedLock.lock();
+                                    }
+                                }
+
+                                if (skipWorkloadNow) {
+                                    curFrameCounters.skipped = true;
+                                    interpolatedLock.unlock();
+                                    displayTicks += workload.viOriginalRate * (displayFrames - (frame + 1));
+                                    ext.sharedResources->interpolatedCondition.notify_all();
+                                    continue;
+                                }
+                            }
+#                       endif
+
+                            if (useDifferentCounters && (prevFrameCounters.available > targetSlot)) {
                                 // Wait until the target has finished presenting if the alternate frame counter (used by the present queue) is making use of this target.
+                                const uint32_t prevTargetIndex = targetSlot + ((prevFrameCounters.available - 1 - targetSlot) / targetSlots) * targetSlots;
                                 std::unique_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
                                 ext.sharedResources->interpolatedCondition.wait(interpolatedLock, [&]() {
-                                    frameReduction = frameReduction || (prevFrameCounters.presented <= targetIndex);
-                                    return prevFrameCounters.presented > targetIndex;
+                                    frameReduction = frameReduction || (prevFrameCounters.presented <= prevTargetIndex);
+                                    return prevFrameCounters.presented > prevTargetIndex;
                                 });
                             }
 
@@ -1170,14 +1215,7 @@ namespace RT64 {
 
                     // For every additional frame, we increase the frames available and notify the present queue.
                     if (generateInterpolatedFrames && (usingMSAA || (frame > 0))) {
-                        {
-                            std::scoped_lock<std::mutex> cursorLock(cursorMutex);
-                            skipWorkloadNow = ((frame + 1) < displayFrames) && (writeCursor != threadCursor);
-#                       if RT64_OFFSCREEN_WORKLOADS
-                            // An offscreen pass alone is the start of the next frame, not the frame: these frames go on.
-                            skipWorkloadNow = skipWorkloadNow && !(workloads[threadCursor].offscreenOnly && (int((threadCursor + 1) % workloads.size()) == writeCursor));
-#                       endif
-                        }
+                        skipWorkloadNow = ((frame + 1) < displayFrames) && newerWorkloadQueued();
 
                         {
                             std::scoped_lock<std::mutex> managerLock(ext.sharedResources->interpolatedMutex);
