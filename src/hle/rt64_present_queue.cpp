@@ -40,6 +40,12 @@ namespace RT64 {
     }
 
     void PresentQueue::advanceToNextPresent() {
+        // For present-stats, when the present was queued: before the stall below, which waits only while the present
+        // thread is the whole queue behind.
+        if (presentStats) {
+            presentQueued[writeCursor] = Timer::current();
+        }
+
         int nextWriteCursor = (writeCursor + 1) % presents.size();
 
         // Stall the thread until the barrier is lifted if we're trying to write on a present being used by the GPU.
@@ -52,10 +58,6 @@ namespace RT64 {
         // Modify the cursor and notify anything waiting on the queue.
         {
             const std::scoped_lock lock(cursorMutex);
-            if (presentStats) {
-                presentQueued[writeCursor] = Timer::current();
-            }
-
             writeCursor = nextWriteCursor;
         }
 
