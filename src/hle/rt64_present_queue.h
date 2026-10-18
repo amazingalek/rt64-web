@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include <array>
 #include <deque>
+#include <optional>
 
 #include "common/rt64_profiling_timer.h"
 #include "gui/rt64_inspector.h"
@@ -70,6 +72,27 @@ namespace RT64 {
         bool uncapped = false;
         Timestamp presentSlot;
 
+        // present-stats (?present-stats): when each present was queued, and where the present thread's time went in the
+        // game frames since it last waited for one or dropped one, which it prints at each one it drops (threadLoop()).
+        enum PresentPhase { PhaseWorkload, PhaseInterpolated, PhaseDraw, PhaseSleep, PhaseWait, PhasePresent, PhaseCount };
+        bool presentStats = false;
+        std::array<Timestamp, PRESENT_QUEUE_SIZE> presentQueued;
+        std::array<int64_t, PhaseCount> busyPhaseMicro = {};
+        int64_t busyLateMicro = 0;
+        uint32_t busyFrames = 0;
+        bool lastPresentDropped = false;
+        Timestamp busyStart;
+
+        // Adds the time until the end of its scope to a phase, while present-stats is on.
+        struct PhaseTimer {
+            PresentQueue *queue;
+            PresentPhase phase;
+            Timestamp start;
+
+            PhaseTimer(PresentQueue *queue, PresentPhase phase);
+            ~PhaseTimer();
+        };
+
         PresentQueue();
         ~PresentQueue();
         void reset();
@@ -82,6 +105,8 @@ namespace RT64 {
         void threadPresent(const Present &present, bool &swapChainValid);
         void skipInterpolation();
         void pace(bool presentDropped);
+        void resetBusyFrames();
+        void reportDroppedPresent(int droppedCursor, int nextCursor);
         void notifyPresentId(const Present &present);
         void threadAdvanceBarrier();
         void threadLoop();
