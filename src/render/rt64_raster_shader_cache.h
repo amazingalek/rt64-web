@@ -93,6 +93,10 @@ namespace RT64 {
         std::vector<std::vector<uint64_t>> prebuildAliases;
         std::atomic<uint32_t> prebuildSection = 0;
 
+        // What the list missed where nothing is built during play (Firefox), built before the next frame (buildMissed()).
+        std::deque<ShaderDescription> missedQueue;
+        std::mutex missedMutex;
+
         RasterShaderCache(uint32_t threadCount, uint32_t ubershaderThreadCount);
         ~RasterShaderCache();
         void setup(RenderDevice *device, RenderShaderFormat shaderFormat, const ShaderLibrary *shaderLibrary, const RenderMultisampling &multisampling);
@@ -106,6 +110,7 @@ namespace RT64 {
         bool waitForPrebuild();
         void learnPrebuild();
         void reportMissed(const ShaderDescription &desc);
+        bool buildMissed();
         void destroyAll();
         RasterShader *getGPUShader(const ShaderDescription &desc);
         RasterShaderUber *getGPUShaderUber() const;

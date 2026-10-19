@@ -162,7 +162,7 @@ namespace RT64 {
 
         // Where building a pipeline holds up the device (WebGPU in Firefox), a specialized shader stalls the frames
         // for longer than the ubershader it replaces costs them, and a race asks for a new one every few seconds.
-        // What isn't prebuilt draws with the ubershader there.
+        // What isn't prebuilt is built with the game waiting there (buildMissed()), never behind it.
         specializedShaders = device->getCapabilities().backgroundPipelineBuilds;
 
         // The prebuilt shaders are built wherever a game has a list, whatever the browser and the adapter: they are
@@ -616,6 +616,9 @@ namespace RT64 {
                 prebuildChanged.notify_all();
             }
         }
+
+        lock.unlock();
+        held = buildMissed() || held;
 #   endif
         return held;
     }
@@ -631,8 +634,8 @@ namespace RT64 {
     }
 
     void RasterShaderCache::submit(const ShaderDescription &desc) {
-        // A browser that builds no shaders during play (Firefox) still learns the ones the list missed, and builds them
-        // with their section on the next visit.
+        // A browser that builds no shaders behind the game (Firefox) still learns the ones the list missed, builds them
+        // before the next frame (buildMissed()), and with their section on the next visit.
         if (!specializedShaders && !recordShaders && (prebuildCount == 0)) {
             return;
         }
@@ -663,6 +666,12 @@ namespace RT64 {
 #   endif
 
         if (!specializedShaders) {
+#       if defined(RT64_PREBUILT_SHADERS)
+            if (prebuildCount > 0) {
+                const std::unique_lock<std::mutex> missedLock(missedMutex);
+                missedQueue.emplace_back(desc);
+            }
+#       endif
             return;
         }
 
@@ -675,6 +684,42 @@ namespace RT64 {
         descQueueChanged.notify_all();
     }
     
+    // Where nothing is built during play (Firefox, setup()), a shader the list missed is built before the next frame,
+    // the game waiting, as a stray of the list is (startPrebuild()). Drawn with the ubershader instead, it stayed so
+    // for the rest of the visit: waiting for a moment when the game sends no frames found none in most of a long play,
+    // and the misses come where the list's sections have all been reached, with no section's wait after them. Each
+    // is built from the ubershader's WGSL with its spec constants as overrides, as a learned one is. Called by
+    // waitForPrebuild(), on the workload thread; returns whether the game waited.
+    bool RasterShaderCache::buildMissed() {
+        std::deque<ShaderDescription> missed;
+        {
+            const std::unique_lock<std::mutex> missedLock(missedMutex);
+            missed.swap(missedQueue);
+        }
+
+        if (missed.empty()) {
+            return false;
+        }
+
+        ElapsedTimer timer;
+        const uint32_t count = uint32_t(missed.size());
+        reportPrebuild(0, count, 0, 0, count);
+        for (uint32_t i = 0; i < count; i++) {
+            const ShaderDescription &desc = missed[i];
+            const std::shared_ptr<RasterShader> shader = std::make_shared<RasterShader>(device, desc, shaderUber->pipelineLayout.get(), shaderFormat,
+                multisampling, shaderCompiler.get(), &optimizerCacheSPIRV, &shaderCacheWGSL);
+            {
+                const std::unique_lock<std::mutex> shadersLock(GPUShadersMutex);
+                GPUShaders[desc.hash()] = shader;
+            }
+
+            reportPrebuild(i + 1, count, i + 1, i + 1, count);
+        }
+
+        printf("RT64: %u shaders the list missed built in %.1f s, the game waiting\n", count, timer.elapsedSeconds());
+        return true;
+    }
+
     void RasterShaderCache::waitForAll() {
         {
             std::unique_lock<std::mutex> queueLock(descQueueMutex);
