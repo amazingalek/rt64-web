@@ -18,7 +18,7 @@
 namespace RT64 {
     // RenderTarget
     
-    const long RenderTarget::MaxDimension = 0x4000L;
+    long RenderTarget::MaxDimension = 0x4000L;
 
     RenderTarget::RenderTarget(uint32_t addressForName, Framebuffer::Type type, const RenderMultisampling &multisampling, bool usesHDR) {
         this->addressForName = addressForName;
@@ -519,6 +519,13 @@ namespace RT64 {
 
     void RenderTarget::setDepthBufferFormat(RenderFormat format) {
         depthFormat = format;
+    }
+
+    // Set once, before anything is made with it.
+    void RenderTarget::setMaxDimension(long maxDimension) {
+        if (maxDimension > 0) {
+            MaxDimension = std::min(maxDimension, 0x4000L);
+        }
     }
 
     void RenderTarget::matchColorToDepthTargets(RenderWorker *worker, const std::vector<std::pair<RenderTarget *, RenderTarget *>> &colorDepthPairs, std::unordered_set<RenderTarget *> &resizedTargets) {

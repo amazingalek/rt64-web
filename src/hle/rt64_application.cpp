@@ -322,6 +322,13 @@ namespace RT64 {
         }
 #   endif
 
+#   if defined(__EMSCRIPTEN__)
+        // A WebGPU device can allow less than D3D12's 16384 a side: 8192 is its default, and what the page gets where the
+        // adapter has no more. A target scaled past it fails validation, and with it every pass drawn on it, so a target,
+        // a tile copy and a reinterpreted tile are clamped to the device's limit instead, as they are to D3D12's.
+        RenderTarget::setMaxDimension(long(device->getCapabilities().maxTextureSize));
+#   endif
+
         // Call the init hook if one was attached.
         RenderHookInit *initHook = GetRenderHookInit();
         if (initHook != nullptr) {

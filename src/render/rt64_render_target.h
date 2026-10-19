@@ -19,7 +19,9 @@ namespace RT64 {
     struct RenderWorker;
 
     struct RenderTarget {
-        static const long MaxDimension;
+        // A render target's widest and tallest once scaled: 16384, D3D12's limit, or less where the device allows less
+        // (setMaxDimension()).
+        static long MaxDimension;
 
         std::unique_ptr<RenderTexture> texture;
         std::unique_ptr<RenderTexture> resolvedTexture;
@@ -77,6 +79,7 @@ namespace RT64 {
         static RenderFormat colorBufferFormat(bool usesHDR);
         static RenderFormat depthBufferFormat();
         static void setDepthBufferFormat(RenderFormat format);
+        static void setMaxDimension(long maxDimension);
 
         // WebGPU needs every attachment of a render pass to be the same size, where elsewhere a depth target only has to
         // be as big as its color target. Grows the targets of each pair to the bigger of the two until every pair
