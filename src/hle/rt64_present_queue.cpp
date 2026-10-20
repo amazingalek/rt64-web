@@ -498,7 +498,11 @@ namespace RT64 {
     // wait ends: a wait shorter than 2 s left presents from before it in the count beside the burst after it, and
     // Banjo-Kazooie in Chrome went to 30 a second 0.4 s after its 1.5 s wait, for 10 s. A game at about the display's
     // rate (a launcher's 60 on a 59-61 Hz display) has nothing to be paced to, and its drops while a page loads aren't
-    // counted either. Nor is a page opened with ?uncapped paced, which drops presents by design.
+    // counted either. Nor is a page opened with ?uncapped paced, which drops presents by design. Nor are presents counted
+    // while the page is hidden, when none is presented (below), or for a second after, as after a wait: a hidden page's
+    // presents dropped while the browser held its present callbacks (plume's isHidden()), and Mario Kart 64's page on a
+    // 240 Hz display went from 114 presents a second to 60 while hidden, each try of the number above falling straight
+    // back and doubling the time to the next, so it stayed at 60 for 80 s after the tab came back.
     // A page opened with ?present-stats prints where the present thread's time went before each present it drops
     // (reportDroppedPresent()).
     void PresentQueue::pace(bool presentDropped) {
@@ -555,10 +559,14 @@ namespace RT64 {
         const uint32_t prebuildWaits = ext.sharedResources->prebuildWaits;
         if (prebuildWaits != pacingPrebuildWaits) {
             pacingPrebuildWaits = prebuildWaits;
-            pacingPrebuildWaited = now;
+            pacingWaited = now;
         }
 
-        if ((pacingPrebuildWaited != Timestamp()) && (Timer::deltaMicroseconds(pacingPrebuildWaited, now) < 1'000'000)) {
+        if (ext.swapChain->isHidden()) {
+            pacingWaited = now;
+        }
+
+        if ((pacingWaited != Timestamp()) && (Timer::deltaMicroseconds(pacingWaited, now) < 1'000'000)) {
             pacingPresents.clear();
             pacingDropped = 0;
             return;
@@ -764,6 +772,12 @@ namespace RT64 {
                 }
 
                 skipPresent = skipPresent || ext.swapChain->isEmpty();
+
+#           if defined(__EMSCRIPTEN__)
+                // A hidden page shows nothing, and in Chrome a present's wait could hold this thread for seconds there
+                // (plume's isHidden()), and the game behind it, whose sound broke up. So it presents nothing until shown.
+                skipPresent = skipPresent || ext.swapChain->isHidden();
+#           endif
 
                 Present &present = presents[processCursor];
                 {

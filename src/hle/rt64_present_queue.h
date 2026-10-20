@@ -68,7 +68,7 @@ namespace RT64 {
         Timestamp pacingRaised;
         int64_t pacingRetryMicro = 0;
         uint32_t pacingPrebuildWaits = 0;
-        Timestamp pacingPrebuildWaited;
+        Timestamp pacingWaited;
         bool uncapped = false;
         Timestamp presentSlot;
 
