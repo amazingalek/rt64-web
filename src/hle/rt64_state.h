@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "xxHash/xxh3.h"
 
 #include "common/rt64_emulator_configuration.h"
@@ -67,6 +69,13 @@ namespace RT64 {
         };
 
         uint8_t *RDRAM;
+
+        // Optional (the runtime's, or nullptr): [0] counts the display lists the runtime has had read in full, and the
+        // interpreter stores in [1 + offset / 256], for each 256 bytes of RDRAM's first 8 MB it reads a command from, the
+        // number of the list it is reading ([0] + 1), so the runtime can hold a load from ROM that would land on commands
+        // of a list not read yet.
+        std::atomic<uint32_t> *displayListReads = nullptr;
+
         uint32_t *MI_INTR_REG;
         void (*checkInterrupts)();
         Microcode microcode;

@@ -182,6 +182,15 @@ namespace RT64 {
                 RT64_LOG_PRINTF("0x%08X 0x%08X", dl->w0, dl->w1);
 #       endif
 
+                // Where this list's commands are, for the runtime (State::displayListReads).
+                if (state->displayListReads != nullptr) {
+                    const uintptr_t rdramOffset = reinterpret_cast<uintptr_t>(dl) - reinterpret_cast<uintptr_t>(state->RDRAM);
+                    if (rdramOffset < 0x800000) {
+                        const uint32_t listNumber = state->displayListReads[0].load(std::memory_order_relaxed) + 1;
+                        state->displayListReads[1 + (rdramOffset >> 8)].store(listNumber, std::memory_order_relaxed);
+                    }
+                }
+
                 if (func != nullptr) {
                     func(state, &dl);
                 }
