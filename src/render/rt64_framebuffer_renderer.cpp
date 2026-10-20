@@ -536,12 +536,13 @@ namespace RT64 {
             }
         };
 
+        uint32_t firstInstance = 0;
         auto drawCallTriangles = [&](const InstanceDrawCall &drawCall) {
             if (drawCall.type == InstanceDrawCall::Type::IndexedTriangles) {
-                worker->commandList->drawIndexedInstanced(drawCall.triangles.faceCount * 3, 1, drawCall.triangles.indexStart, 0, 0);
+                worker->commandList->drawIndexedInstanced(drawCall.triangles.faceCount * 3, 1, drawCall.triangles.indexStart, 0, firstInstance);
             }
             else {
-                worker->commandList->drawInstanced(drawCall.triangles.faceCount * 3, 1, drawCall.triangles.indexStart, 0);
+                worker->commandList->drawInstanced(drawCall.triangles.faceCount * 3, 1, drawCall.triangles.indexStart, firstInstance);
             }
         };
 
@@ -620,6 +621,11 @@ namespace RT64 {
                 rasterParams.renderIndex = i;
                 rasterParams.screenScale = triangles.screenScale;
                 rasterParams.screenOffset = triangles.screenOffset;
+#           ifdef RT64_RENDER_INDEX_BY_INSTANCE
+                // The shaders take the draw's index as its first instance instead (rt64_raster_params.h).
+                rasterParams.renderIndex = 0;
+                firstInstance = i;
+#           endif
 
                 // A prebuilt decal's first draw marks the stencil where the surface is no deeper than its high bound
                 // (RasterShader::createPipeline()), padding0 1 for it: nothing else reads padding0 in a raster draw.

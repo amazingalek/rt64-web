@@ -4,6 +4,7 @@
 
 #include "shared/rt64_other_mode.h"
 #include "shared/rt64_raster_params.h"
+#include "RasterRenderIndex.hlsli"
 #include "shared/rt64_render_flags.h"
 
 #include "FbRendererCommon.hlsli"
@@ -29,7 +30,7 @@ LIBRARY_EXPORT void RasterVS(const RenderParams rp, in float4 iPosition, in floa
     const bool copyMode = (otherMode.cycleType() == G_CYC_COPY);
     const bool zSourcePrim = (otherMode.zSource() == G_ZS_PRIM);
     if (!copyMode && zSourcePrim) {
-        const uint instanceIndex = instanceRenderIndices[gConstants.renderIndex].instanceIndex;
+        const uint instanceIndex = instanceRenderIndices[RENDER_INDEX].instanceIndex;
         ndcPos.z = instanceRDPParams[instanceIndex].primDepth.x * ndcPos.w;
     }
 
@@ -41,7 +42,7 @@ LIBRARY_EXPORT void RasterVS(const RenderParams rp, in float4 iPosition, in floa
 
 #if defined(DYNAMIC_RENDER_PARAMS)
 RenderParams getRenderParams() {
-    uint instanceIndex = instanceRenderIndices[gConstants.renderIndex].instanceIndex;
+    uint instanceIndex = instanceRenderIndices[RENDER_INDEX].instanceIndex;
     return DynamicRenderParams[instanceIndex];
 }
 #elif defined(SPEC_CONSTANT_RENDER_PARAMS)
@@ -53,6 +54,9 @@ void VSMain(
     in float4 iPosition : POSITION
     , in float2 iUV : TEXCOORD
     , in float4 iColor : COLOR
+#ifdef RT64_RENDER_INDEX_BY_INSTANCE
+    , in uint iInstance : SV_InstanceID
+#endif
     , out float4 oPosition : SV_POSITION
     , out float2 oUV : TEXCOORD
     , out float4 oSmoothColor : COLOR0
@@ -64,10 +68,18 @@ void VSMain(
     , out float4 oFlatColor : COLOR1
 #endif
 #endif
+#ifdef RT64_RENDER_INDEX_BY_INSTANCE
+    // Last, so that it takes the same location as the pixel shaders' (RasterRenderIndex.hlsli).
+    , nointerpolation out uint oRenderIndex : RENDERINDEX
+#endif
 )
 {
 #if !defined(DYNAMIC_RENDER_PARAMS) && !defined(VERTEX_FLAT_COLOR)
     float4 oFlatColor;
+#endif
+#ifdef RT64_RENDER_INDEX_BY_INSTANCE
+    gRenderIndex = iInstance;
+    oRenderIndex = iInstance;
 #endif
     RasterVS(getRenderParams(), iPosition, iUV, iColor, oPosition, oUV, oSmoothColor, oFlatColor);
 }

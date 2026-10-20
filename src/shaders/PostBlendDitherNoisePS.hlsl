@@ -3,6 +3,7 @@
 //
 
 #include "shared/rt64_raster_params.h"
+#include "RasterRenderIndex.hlsli"
 
 #include "FbRendererCommon.hlsli"
 #include "Random.hlsli"
@@ -14,11 +15,17 @@ void PSMain(
     , in float2 vertexUV : TEXCOORD
     , in float4 vertexSmoothColor : COLOR0
     , nointerpolation in float4 vertexFlatColor : COLOR1
+#ifdef RT64_RENDER_INDEX_BY_INSTANCE
+    , nointerpolation in uint vertexRenderIndex : RENDERINDEX
+#endif
     , [[vk::location(0)]] out float4 resultColor : SV_TARGET0
 )
 {
+#ifdef RT64_RENDER_INDEX_BY_INSTANCE
+    gRenderIndex = vertexRenderIndex;
+#endif
     int2 pixelPosSeed = floor(vertexPosition.xy);
-    uint randomSeed = initRand(FrParams.frameCount, gConstants.renderIndex * (pixelPosSeed.y * 65536 + pixelPosSeed.x), 16);
+    uint randomSeed = initRand(FrParams.frameCount, RENDER_INDEX * (pixelPosSeed.y * 65536 + pixelPosSeed.x), 16);
     const float Range = (7.0f * FrParams.ditherNoiseStrength) / 255.0f;
     resultColor.r = nextRand(randomSeed) * Range;
     resultColor.g = nextRand(randomSeed) * Range;

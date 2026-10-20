@@ -5,6 +5,7 @@
 #include "shared/rt64_blender.h"
 #include "shared/rt64_color_combiner.h"
 #include "shared/rt64_raster_params.h"
+#include "RasterRenderIndex.hlsli"
 
 #include "Depth.hlsli"
 #include "FbRendererCommon.hlsli"
@@ -94,7 +95,7 @@ float4 sampleDrawTile(uint t, OtherMode otherMode, RenderFlags flags, int tileIn
     const bool oneCycleHardwareBug = (otherMode.cycleType() == G_CYC_1CYCLE);
     const bool firstTile = (t == 0) || oneCycleHardwareBug;
     const uint tileIndex = firstTile ? tileIndex0 : tileIndex1;
-    const uint globalTileIndex = instanceRenderIndices[gConstants.renderIndex].rdpTileIndex + tileIndex;
+    const uint globalTileIndex = instanceRenderIndices[RENDER_INDEX].rdpTileIndex + tileIndex;
     RDPTile rdpTile = RDPTiles[globalTileIndex];
     if (!renderFlagDynamicTiles(flags)) {
         rdpTile.cms = firstTile ? renderCMS0(flags) : renderCMS1(flags);
@@ -102,7 +103,7 @@ float4 sampleDrawTile(uint t, OtherMode otherMode, RenderFlags flags, int tileIn
         rdpTile.nativeSampler = firstTile ? renderFlagNativeSampler0(flags) : renderFlagNativeSampler1(flags);
     }
 
-    const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[gConstants.renderIndex].rdpTileIndex, tileIndex);
+    const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[RENDER_INDEX].rdpTileIndex, tileIndex);
     const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? highResUV : lowResUV;
     return sampleTexture(otherMode, flags, textureUV, ddxUV, ddyUV, rdpTile, gpuTile, (t == 1) && oneCycleHardwareBug);
 }
@@ -125,7 +126,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
     }
 #endif
     
-    const uint instanceIndex = instanceRenderIndices[gConstants.renderIndex].instanceIndex;
+    const uint instanceIndex = instanceRenderIndices[RENDER_INDEX].instanceIndex;
     const float4 vertexColor = renderFlagSmoothShade(rp.flags) ? vertexSmoothColor : float4(vertexFlatColor.rgb, vertexSmoothColor.a);
     const ColorCombiner colorCombiner = { rp.ccL, rp.ccH };
     const bool depthClampNear = renderFlagNoN(rp.flags);
@@ -212,7 +213,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
         lodScale = FbParams.resolutionScale.y;
     }
     
-    computeLOD(otherMode, instanceRenderIndices[gConstants.renderIndex].rdpTileCount, instanceRDPParams[instanceIndex].primLOD, lodScale, ddxVertexUV, ddyVertexUV, tileIndex0, tileIndex1, lodFraction);
+    computeLOD(otherMode, instanceRenderIndices[RENDER_INDEX].rdpTileCount, instanceRDPParams[instanceIndex].primLOD, lodScale, ddxVertexUV, ddyVertexUV, tileIndex0, tileIndex1, lodFraction);
 
     float4 texVal0 = float4(0.0f, 0.0f, 0.0f, 1.0f);
     float4 texVal1 = float4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -251,7 +252,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
     }
 #else
     if (renderFlagUsesTexture0(rp.flags)) {
-        const uint globalTileIndex = instanceRenderIndices[gConstants.renderIndex].rdpTileIndex + tileIndex0;
+        const uint globalTileIndex = instanceRenderIndices[RENDER_INDEX].rdpTileIndex + tileIndex0;
         RDPTile rdpTile = RDPTiles[globalTileIndex];
         if (!renderFlagDynamicTiles(rp.flags)) {
             rdpTile.cms = renderCMS0(rp.flags);
@@ -259,7 +260,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
             rdpTile.nativeSampler = renderFlagNativeSampler0(rp.flags);
         }
         
-        const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[gConstants.renderIndex].rdpTileIndex, tileIndex0);
+        const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[RENDER_INDEX].rdpTileIndex, tileIndex0);
         const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? highResUV : lowResUV;
         texVal0 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, false);
     }
@@ -267,7 +268,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
     if (renderFlagUsesTexture1(rp.flags)) {
         const bool oneCycleHardwareBug = (otherMode.cycleType() == G_CYC_1CYCLE);
         const uint tileIndex = oneCycleHardwareBug ? tileIndex0 : tileIndex1;
-        const uint globalTileIndex = instanceRenderIndices[gConstants.renderIndex].rdpTileIndex + tileIndex;
+        const uint globalTileIndex = instanceRenderIndices[RENDER_INDEX].rdpTileIndex + tileIndex;
         RDPTile rdpTile = RDPTiles[globalTileIndex];
         if (!renderFlagDynamicTiles(rp.flags)) {
             rdpTile.cms = oneCycleHardwareBug ? renderCMS0(rp.flags) : renderCMS1(rp.flags);
@@ -275,7 +276,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
             rdpTile.nativeSampler = oneCycleHardwareBug ? renderFlagNativeSampler0(rp.flags) : renderFlagNativeSampler1(rp.flags);
         }
         
-        const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[gConstants.renderIndex].rdpTileIndex, tileIndex);
+        const GPUTile gpuTile = drawGPUTile(instanceRenderIndices[RENDER_INDEX].rdpTileIndex, tileIndex);
         const float2 textureUV = gpuTileFlagHighRes(gpuTile.flags) ? highResUV : lowResUV;
         const uint nativeSampler = renderFlagNativeSampler1(rp.flags);
         texVal1 = sampleTexture(otherMode, rp.flags, textureUV, ddxVertexUV, ddyVertexUV, rdpTile, gpuTile, oneCycleHardwareBug);
@@ -383,7 +384,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
 #endif
 
     // Add highlight color to the last step.
-    uint highlightColorUint = instanceRenderIndices[gConstants.renderIndex].highlightColor;
+    uint highlightColorUint = instanceRenderIndices[RENDER_INDEX].highlightColor;
     if (highlightColorUint > 0) {
         float4 highlightColor = RGBA32ToFloat4(highlightColorUint);
         resultColor = lerp(resultColor, highlightColor, highlightColor.a);
@@ -400,7 +401,7 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
 
 #if defined(DYNAMIC_RENDER_PARAMS)
 RenderParams getRenderParams() {
-    uint instanceIndex = instanceRenderIndices[gConstants.renderIndex].instanceIndex;
+    uint instanceIndex = instanceRenderIndices[RENDER_INDEX].instanceIndex;
     return DynamicRenderParams[instanceIndex];
 }
 #elif defined(SPEC_CONSTANT_RENDER_PARAMS)
@@ -414,6 +415,9 @@ void PSMain(
     , in float4 vertexSmoothColor : COLOR0
 #if defined(DYNAMIC_RENDER_PARAMS) || defined(VERTEX_FLAT_COLOR)
     , nointerpolation in float4 vertexFlatColor : COLOR1
+#endif
+#ifdef RT64_RENDER_INDEX_BY_INSTANCE
+    , nointerpolation in uint vertexRenderIndex : RENDERINDEX
 #endif
 #if defined(DYNAMIC_RENDER_PARAMS)
     , bool isFrontFace : SV_IsFrontFace
@@ -429,6 +433,9 @@ void PSMain(
 #endif
 )
 {
+#ifdef RT64_RENDER_INDEX_BY_INSTANCE
+    gRenderIndex = vertexRenderIndex;
+#endif
 #if !defined(DYNAMIC_RENDER_PARAMS)
 #if !defined(VERTEX_FLAT_COLOR)
     float4 vertexFlatColor = 0.0f;
