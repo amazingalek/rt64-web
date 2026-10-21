@@ -859,10 +859,14 @@ namespace RT64 {
             ext.workloadGraphicsWorker->wait();
             workerMutex.unlock();
 
-            // Update the GPU profiler with the results from the timestamps of the frame.
+            // Update the GPU profiler with the results from the timestamps of the frame. Not on WebGPU, which has no
+            // timestamps (plume's queries there do nothing and read zeros), and where behind plume's device thread each
+            // of the two calls waits for a round trip to the page's thread after every workload.
+#       if !defined(__EMSCRIPTEN__)
             queryPool->queryResults();
             const uint64_t *frameTimestamps = queryPool->getResults();
             rendererGPUProfiler.log(double(frameTimestamps[1] - frameTimestamps[0]) / 1000000.0);
+#       endif
 
             // Indicate to the texture cache it's safe to delete the textures if no locks are active.
             ext.textureCache->decrementLock();
