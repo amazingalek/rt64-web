@@ -93,6 +93,13 @@ namespace RT64 {
     }
 
     hlslpp::uint2 VI::fbSize() const {
+        // A vertical region that ends where or before it starts shows no lines, so it gives no size, as a blank VI
+        // doesn't. Estimated from it, the height wrapped round to billions of lines, and the aspect ratio near 0 that
+        // gave made every target drawn while it was the screen's VI as wide as a target can be (MaxDimension).
+        if (vRegion.vEnd <= vRegion.vStart) {
+            return hlslpp::uint2(0, 0);
+        }
+
         hlslpp::uint2 size = { width, 0 };
         
         // In interlaced without deflickering, the stride of the framebuffer is usually double of 
