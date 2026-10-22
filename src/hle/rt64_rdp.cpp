@@ -959,7 +959,8 @@ namespace RT64 {
     }
     
     void RDP::setPrimDepth(uint16_t z, uint16_t dz) {
-        const float Fixed15ToFloat = 1.0f / 32767.0f;
+        // A triangle's depth is its viewport z over 1024 (rt64_rsp.cpp, DepthRange), so a 15-bit hardware z is z / 32768.
+        const float Fixed15ToFloat = 1.0f / 32768.0f;
         const float Fixed16ToFloat = 1.0f / 65535.0f;
         hlslpp::float2 &primDepth = primDepthStack[primDepthStackSize - 1];
         primDepth.x = (z & 0x7FFFU) * Fixed15ToFloat;
