@@ -1128,9 +1128,28 @@ namespace RT64 {
             maxMatrix = std::max(maxMatrix, worldIndices[globalIndex]);
         }
 
+        // The box and the facing test below are read off posScreen, xyz / w with no clipping. A vertex at or behind the
+        // camera plane (w <= 0) doesn't land there: the divide flips it through the centre, so a triangle crossing the
+        // plane got a box anywhere and a winding that was a coin toss, and one a hair in front projected past what
+        // the int32 casts hold. The RSP clips such a triangle and the RDP draws what is left, but here it could be
+        // judged back-facing or its box miss the viewport, and a pass made only of such triangles (a model filling
+        // the bottom of the picture with the camera pitched up at it) had an empty drawColorRect and wasn't drawn in
+        // interpolated frames. Such a triangle is taken as facing the camera and as covering the scissor, the bound
+        // the RDP draws against. The GPU still clips the triangle as it always did.
+        bool unprojectable = false;
+        for (int i = 0; i < 3; i++) {
+            const hlslpp::float4 &t = workload.drawData.posTransformed[globalIndices[i]];
+            const hlslpp::float3 &s = posScreen[globalIndices[i]];
+            // 4096 pixels each way is past any framebuffer; squared so a NaN fails the test too.
+            if ((t[3] <= 0.0f) || !(s[0] * s[0] < 16777216.0f) || !(s[1] * s[1] < 16777216.0f)) {
+                unprojectable = true;
+                break;
+            }
+        }
+
         bool visibleTri = true;
         const bool usesCulling = geometryMode & cullBothMask;
-        if (usesCulling) {
+        if (usesCulling && !unprojectable) {
             const hlslpp::float3 U = posScreen[globalIndices[1]] - posScreen[globalIndices[0]];
             const hlslpp::float3 V = posScreen[globalIndices[2]] - posScreen[globalIndices[0]];
             const hlslpp::float3 N = hlslpp::cross(V, U);
@@ -1141,8 +1160,8 @@ namespace RT64 {
         if (visibleTri && !scissorRect.isNull()) {
             fbPair.scissorRect.merge(scissorRect);
 
-            FixedRect drawRect;
-            for (int i = 0; i < 3; i++) {
+            FixedRect drawRect = unprojectable ? scissorRect : FixedRect();
+            for (int i = 0; (i < 3) && !unprojectable; i++) {
                 const hlslpp::float3 &v = posScreen[globalIndices[i]];
                 drawRect.ulx = std::min(drawRect.ulx, int32_t(v[0] * 4.0f));
                 drawRect.uly = std::min(drawRect.uly, int32_t(v[1] * 4.0f));
