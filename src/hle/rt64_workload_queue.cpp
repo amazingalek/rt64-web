@@ -1125,6 +1125,9 @@ namespace RT64 {
                 requiredFrames = std::min(requiredFrames, InterpolatedTargetSlots);
 #           endif
                 if ((requiredFrames > 0) && (interpolatedTargets.size() < requiredFrames)) {
+                    // The present thread indexes this vector under the lock while it shows the previous game frame's
+                    // targets, and growing it can move every element.
+                    std::scoped_lock<std::mutex> interpolatedLock(ext.sharedResources->interpolatedMutex);
                     uint32_t previousSize = uint32_t(interpolatedTargets.size());
                     interpolatedTargets.resize(requiredFrames);
                     for (uint32_t i = previousSize; i < requiredFrames; i++) {
