@@ -793,14 +793,11 @@ namespace RT64 {
         assert(width > 0);
         assert(height > 0);
 
-        uint64_t newId = 0;
         uint32_t textureWidth = width;
         uint32_t textureHeight = height;
         fixSizeToMultiple(textureWidth, textureHeight);
 
         for (auto &it : tileCopies) {
-            newId = std::max(it.first, newId);
-
             TileCopy &tileCopy = it.second;
             if (tileCopy.usedTimestamp == usedTimestamp) {
                 continue;
@@ -815,8 +812,10 @@ namespace RT64 {
             }
         }
 
-        // Make a new tile with a new Id.
-        TileCopy &tileCopy = tileCopies[++newId];
+        // Make a new tile with an Id no earlier tile had, so one named by a workload made before destroyAllTileCopies isn't
+        // taken for it.
+        const uint64_t newId = ++tileCopyIdCounter;
+        TileCopy &tileCopy = tileCopies[newId];
         tileCopy.id = newId;
         tileCopy.textureWidth = textureWidth;
         tileCopy.textureHeight = textureHeight;
