@@ -734,14 +734,48 @@ namespace RT64 {
             const bool wrappedUlt = (curTile.cmt == G_TX_WRAP) && (modulo(integerUlt, curTile.maskt * 4) == modulo(expectedUlt, curTile.maskt * 4));
             const bool wrappedLrs = (curTile.cms == G_TX_WRAP) && (modulo(integerLrs, curTile.masks * 4) == modulo(expectedLrs, curTile.masks * 4));
             const bool wrappedLrt = (curTile.cmt == G_TX_WRAP) && (modulo(integerLrt, curTile.maskt * 4) == modulo(expectedLrt, curTile.maskt * 4));
-            curTileMap.prevUls = curTile.uls - curTileMap.deltaUls;
-            curTileMap.prevUlt = curTile.ult - curTileMap.deltaUlt;
-            curTileMap.prevLrs = curTile.lrs - curTileMap.deltaLrs;
-            curTileMap.prevLrt = curTile.lrt - curTileMap.deltaLrt;
+            const float beforeUls = curTileMap.deltaUls;
+            const float beforeUlt = curTileMap.deltaUlt;
+            const float beforeLrs = curTileMap.deltaLrs;
+            const float beforeLrt = curTileMap.deltaLrt;
             curTileMap.deltaUls = wrappedUls || (abs(deltaUls) >= curTile.masks * 2) ? curTileMap.deltaUls : deltaUls;
             curTileMap.deltaUlt = wrappedUlt || (abs(deltaUlt) >= curTile.maskt * 2) ? curTileMap.deltaUlt : deltaUlt;
             curTileMap.deltaLrs = wrappedLrs || (abs(deltaLrs) >= curTile.masks * 2) ? curTileMap.deltaLrs : deltaLrs;
             curTileMap.deltaLrt = wrappedLrt || (abs(deltaLrt) >= curTile.maskt * 2) ? curTileMap.deltaLrt : deltaLrt;
+
+            // A scroll is placed between frames only while it is steady, each direction by itself, from this frame's
+            // own start. Drawn from where the last frame's scroll said the tile was, a texture that jumps once (a
+            // picture stepping to its next cell) slid there a frame late, a slow scroll that moves every other frame
+            // slid back on the frames it rested, and one that changed speed started each frame in the wrong place.
+            // A direction that scrolls the same way as the last frame did, 0.4 to 2.5 times as far, is placed; the
+            // last frame's amount stands in for this one's only across a wrap, where this one's can't be read. Any
+            // other is drawn where the game put it. S and T are judged apart, so a drift in one doesn't stop the
+            // other's flow.
+            auto steady = [](float now, float before) {
+                if ((before == 0.0f) || (now == 0.0f) || ((now < 0.0f) != (before < 0.0f))) {
+                    return false;
+                }
+
+                const float ratio = now / before;
+                return (ratio >= 0.4f) && (ratio <= 2.5f);
+            };
+
+            // A tile's two edges move together in every case seen: an edge that stands while the other flows is
+            // allowed, one that does anything else is not.
+            auto placed = [&](float nowA, float beforeA, float nowB, float beforeB) {
+                const bool a = steady(nowA, beforeA);
+                const bool b = steady(nowB, beforeB);
+                const bool aStill = (nowA == 0.0f) && (beforeA == 0.0f);
+                const bool bStill = (nowB == 0.0f) && (beforeB == 0.0f);
+                return (a || b) && (a || aStill) && (b || bStill);
+            };
+
+            const bool placeS = placed(curTileMap.deltaUls, beforeUls, curTileMap.deltaLrs, beforeLrs);
+            const bool placeT = placed(curTileMap.deltaUlt, beforeUlt, curTileMap.deltaLrt, beforeLrt);
+            curTileMap.prevUls = placeS ? (curTile.uls - curTileMap.deltaUls) : curTile.uls;
+            curTileMap.prevLrs = placeS ? (curTile.lrs - curTileMap.deltaLrs) : curTile.lrs;
+            curTileMap.prevUlt = placeT ? (curTile.ult - curTileMap.deltaUlt) : curTile.ult;
+            curTileMap.prevLrt = placeT ? (curTile.lrt - curTileMap.deltaLrt) : curTile.lrt;
             curTileMap.mapped = true;
             firstCurWorkloadMap.prevTilesMapped[indices.second] = true;
             tileInterpolationUsed = tileInterpolationUsed || tileScrolled;
