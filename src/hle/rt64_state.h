@@ -92,6 +92,9 @@ namespace RT64 {
         uint64_t workloadCounter;
         std::vector<uint64_t> evictedTextureHashes;
         std::unique_ptr<RenderTarget> dummyDepthTarget;
+#   if RT64_WGSL
+        DummyDepthTargets dummyDepthTargets;
+#   endif
         DrawCall drawCall;
         DrawStatus drawStatus;
         SpriteCommand activeSpriteCommand;

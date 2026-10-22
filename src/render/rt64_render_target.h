@@ -83,8 +83,8 @@ namespace RT64 {
 
         // WebGPU needs every attachment of a render pass to be the same size, where elsewhere a depth target only has to
         // be as big as its color target. Grows the targets of each pair to the bigger of the two until every pair
-        // matches: a depth target can be in several pairs (the dummy one, for every color target drawn without depth),
-        // and so can a color target.
+        // matches: a depth target can be in several pairs, and so can a color target. A color target drawn without
+        // depth is in none (DummyDepthTargets).
         static void matchColorToDepthTargets(RenderWorker *worker, const std::vector<std::pair<RenderTarget *, RenderTarget *>> &colorDepthPairs, std::unordered_set<RenderTarget *> &resizedTargets);
     };
 };

@@ -121,6 +121,9 @@ namespace RT64 {
     void WorkloadQueue::updateMultisampling() {
         renderFramebufferManager->destroyAll();
         dummyDepthTarget.reset();
+#   if RT64_WGSL
+        dummyDepthTargets.dummies.clear();
+#   endif
         framebufferRenderer->updateMultisampling();
     }
 
@@ -553,8 +556,10 @@ namespace RT64 {
                         colorFb->readHeight = 0;
                     }
 
-                    // Set up the dummy target used for rendering the depth if no depth framebuffer is active.
+                    // Set up the dummy target used for rendering the depth if no depth framebuffer is active. WebGPU's
+                    // is one of its color target's size, got as it draws (DummyDepthTargets).
                     if (depthFb == nullptr) {
+#                   if !RT64_WGSL
                         if (dummyDepthTarget == nullptr) {
                             dummyDepthTarget = std::make_unique<RenderTarget>(0, Framebuffer::Type::Depth, targetManager.multisampling, targetManager.usesHDR);
                             dummyDepthTarget->setupDepth(ext.workloadGraphicsWorker, rtWidth, rtHeight);
@@ -567,6 +572,7 @@ namespace RT64 {
                         if (colorTarget != nullptr) {
                             colorDepthPairs.emplace_back(colorTarget, dummyDepthTarget.get());
                         }
+#                   endif
                     }
                     else if (depthTarget != nullptr) {
                         if (colorTarget != nullptr) {
@@ -632,7 +638,12 @@ namespace RT64 {
             for (uint32_t f = 0; f < fbPairCount; f++) {
                 const FramebufferPair &fbPair = workload.fbPairs[f];
                 if (getTargetsFromPair(f)) {
-                    RenderFramebufferStorage &fbStorage = renderFramebufferManager->get(fbKey, colorTarget, (depthTarget != nullptr) ? depthTarget : dummyDepthTarget.get());
+#               if RT64_WGSL
+                    RenderTarget *pairDepthTarget = (depthTarget != nullptr) ? depthTarget : dummyDepthTargets.get(ext.workloadGraphicsWorker, colorTarget, workload.submissionFrame);
+#               else
+                    RenderTarget *pairDepthTarget = (depthTarget != nullptr) ? depthTarget : dummyDepthTarget.get();
+#               endif
+                    RenderFramebufferStorage &fbStorage = renderFramebufferManager->get(fbKey, colorTarget, pairDepthTarget);
                     FramebufferRenderer::DrawParams drawParams;
                     drawParams.worker = ext.workloadGraphicsWorker;
                     drawParams.fbStorage = &fbStorage;
@@ -860,6 +871,11 @@ namespace RT64 {
             framebufferRenderer->waitForUploaders();
             ext.workloadGraphicsWorker->execute();
             ext.workloadGraphicsWorker->wait();
+
+#       if RT64_WGSL
+            dummyDepthTargets.freeUnused(workload.submissionFrame, renderFramebufferManager.get());
+#       endif
+
             workerMutex.unlock();
 
             // Update the GPU profiler with the results from the timestamps of the frame.

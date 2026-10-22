@@ -79,4 +79,28 @@ namespace RT64 {
         void destroyAll();
         void destroyAllWithRenderTarget(RenderTarget *renderTarget);
     };
+
+#if RT64_WGSL
+    // A color target drawn without a depth framebuffer draws with a dummy depth target. Elsewhere one dummy grows to the
+    // biggest color target drawn with it, but WebGPU wants a pass's depth attachment its color attachment's size, and
+    // one dummy matched to every color target (matchColorToDepthTargets) grew each of them to the biggest any had been:
+    // a game's 576-wide menus' size, kept by every 320-wide level's targets after them. So there is a dummy for each
+    // color target size.
+    struct DummyDepthTargets {
+        struct Dummy {
+            std::unique_ptr<RenderTarget> target;
+            uint64_t frame = 0;
+        };
+
+        std::vector<Dummy> dummies;
+
+        // The dummy of the color target's size, made if there is none.
+        RenderTarget *get(RenderWorker *worker, const RenderTarget *colorTarget, uint64_t frame);
+
+        // Frees the dummies nothing drew with in the last UnusedFrames frames, long after any GPU work that used them.
+        // A size that comes back within a few seconds (a screen's fade, a pause menu) keeps its dummy.
+        static const uint64_t UnusedFrames = 120;
+        void freeUnused(uint64_t frame, RenderFramebufferManager *framebufferManager);
+    };
+#endif
 };

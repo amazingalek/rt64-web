@@ -1418,7 +1418,12 @@ namespace RT64 {
                 while (pairCursor < maxFramebufferPair) {
                     const FramebufferPair &fbPair = workload.fbPairs[pairCursor];
                     if (getTargetsFromPair(pairCursor)) {
-                        RenderFramebufferStorage &fbStorage = renderFramebufferManager->get(fbKey, colorTarget, (depthTarget != nullptr) ? depthTarget : dummyDepthTarget.get());
+#                   if RT64_WGSL
+                        RenderTarget *pairDepthTarget = (depthTarget != nullptr) ? depthTarget : dummyDepthTargets.get(ext.framebufferGraphicsWorker, colorTarget, workload.submissionFrame);
+#                   else
+                        RenderTarget *pairDepthTarget = (depthTarget != nullptr) ? depthTarget : dummyDepthTarget.get();
+#                   endif
+                        RenderFramebufferStorage &fbStorage = renderFramebufferManager->get(fbKey, colorTarget, pairDepthTarget);
                         FramebufferRenderer::DrawParams drawParams;
                         drawParams.worker = ext.framebufferGraphicsWorker;
                         drawParams.fbStorage = &fbStorage;
@@ -1657,8 +1662,10 @@ namespace RT64 {
                         colorFb->readHeight = 0;
                     }
 
-                    // Set up the dummy target used for rendering the depth if no depth framebuffer is active.
+                    // Set up the dummy target used for rendering the depth if no depth framebuffer is active. WebGPU's
+                    // is one of its color target's size, got as it draws (DummyDepthTargets).
                     if (depthFb == nullptr) {
+#                   if !RT64_WGSL
                         if (dummyDepthTarget == nullptr) {
                             dummyDepthTarget = std::make_unique<RenderTarget>(0, Framebuffer::Type::Depth, renderTargetManager.multisampling, renderTargetManager.usesHDR);
                             dummyDepthTarget->setupDepth(ext.framebufferGraphicsWorker, rtWidth, rtHeight);
@@ -1669,6 +1676,7 @@ namespace RT64 {
                         }
 
                         colorDepthPairs.emplace_back(colorTarget, dummyDepthTarget.get());
+#                   endif
                     }
                     // Resize the depth target if necessary.
                     else if (depthTarget != nullptr) {
@@ -1711,6 +1719,10 @@ namespace RT64 {
 
             // Render any remaining batches of framebuffers.
             renderAndSynchronize(workload.fbPairCount);
+
+#       if RT64_WGSL
+            dummyDepthTargets.freeUnused(workload.submissionFrame, renderFramebufferManager.get());
+#       endif
         }
         else {
             // Process all tiles.
@@ -2130,6 +2142,9 @@ namespace RT64 {
         renderTargetManager.destroyAll();
         renderTargetManager.setMultisampling(multisampling);
         dummyDepthTarget.reset();
+#   if RT64_WGSL
+        dummyDepthTargets.dummies.clear();
+#   endif
         framebufferRenderer->updateMultisampling();
         updateRenderFlagSampleCount();
     }

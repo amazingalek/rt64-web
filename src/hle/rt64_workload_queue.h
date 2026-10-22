@@ -106,6 +106,9 @@ namespace RT64 {
         std::unique_ptr<RSPProcessor> rspProcessor;
         std::unique_ptr<VertexProcessor> vertexProcessor;
         std::unique_ptr<RenderTarget> dummyDepthTarget;
+#   if RT64_WGSL
+        DummyDepthTargets dummyDepthTargets;
+#   endif
         std::unique_ptr<RenderQueryPool> queryPool;
         FramebufferChangePool scratchFbChangePool;
         ProfilingTimer rendererCPUProfiler = ProfilingTimer(120);

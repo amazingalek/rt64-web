@@ -190,4 +190,39 @@ namespace RT64 {
             }
         }
     }
+
+#if RT64_WGSL
+    // DummyDepthTargets
+
+    RenderTarget *DummyDepthTargets::get(RenderWorker *worker, const RenderTarget *colorTarget, uint64_t frame) {
+        assert(colorTarget != nullptr);
+
+        for (Dummy &dummy : dummies) {
+            if ((dummy.target->width == colorTarget->width) && (dummy.target->height == colorTarget->height)) {
+                dummy.frame = frame;
+                return dummy.target.get();
+            }
+        }
+
+        Dummy dummy;
+        dummy.target = std::make_unique<RenderTarget>(0, Framebuffer::Type::Depth, colorTarget->multisampling, colorTarget->usesHDR);
+        dummy.target->setupDepth(worker, colorTarget->width, colorTarget->height);
+        dummy.frame = frame;
+        dummies.emplace_back(std::move(dummy));
+        return dummies.back().target.get();
+    }
+
+    void DummyDepthTargets::freeUnused(uint64_t frame, RenderFramebufferManager *framebufferManager) {
+        auto it = dummies.begin();
+        while (it != dummies.end()) {
+            if ((it->frame + UnusedFrames) < frame) {
+                framebufferManager->destroyAllWithRenderTarget(it->target.get());
+                it = dummies.erase(it);
+            }
+            else {
+                it++;
+            }
+        }
+    }
+#endif
 };
