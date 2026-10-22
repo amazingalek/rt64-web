@@ -427,7 +427,9 @@ namespace RT64 {
                     // to the page's thread) isn't added to every period. In Chrome the pages of games below the
                     // display's rate presented every 18 ms, 55.6 a second, where those at its rate, which never sleep
                     // here, presented 60. A present a whole period past its slot or more starts the slots from itself.
-                    // Where the swap chain learns of the display's frames as they come (WebGPU), the wait ends on one.
+                    // Where the swap chain learns of the display's frames as they come (WebGPU), it sleeps: until a
+                    // frame where timed waits end late, else until the slot, woken by the frames and spun from the last
+                    // (plume-web e16e003: this thread's 100 us sleeps in Chrome now and then took a tick).
                     const auto presentPeriod = std::chrono::nanoseconds(1'000'000'000 / targetRate);
                     if ((presentSlot == Timestamp()) || ((presentTimestamp - presentSlot) >= presentPeriod)) {
                         presentSlot = presentTimestamp;
