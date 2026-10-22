@@ -613,6 +613,9 @@ namespace RT64 {
             for (uint32_t f = 0; f < fbPairCount; f++) {
                 const FramebufferPair &fbPair = workload.fbPairs[f];
                 fbManager.performDiscards(fbPair.startFbDiscards);
+#           if RT64_FREE_DISCARDED_TARGETS
+                targetManager.discard(fbPair.startFbDiscards, workload.submissionFrame);
+#           endif
             }
             
             // Add all framebuffer pairs to the framebuffer renderer and setup the operations.
@@ -870,6 +873,12 @@ namespace RT64 {
 
             // Indicate to the texture cache it's safe to delete the textures if no locks are active.
             ext.textureCache->decrementLock();
+
+#       if RT64_FREE_DISCARDED_TARGETS
+            // Free the discarded targets no workload asked for again in as many workloads as the texture cache keeps
+            // a texture nothing used, long after any workload or present that could still hold one.
+            targetManager.freeDiscarded(workload.submissionFrame, WORKLOAD_QUEUE_SIZE * 32, renderFramebufferManager.get());
+#       endif
         }
 
         if ((overrideTarget != nullptr) && !usingMSAA) {

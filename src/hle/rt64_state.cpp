@@ -647,6 +647,9 @@ namespace RT64 {
             }
 
             framebufferManager.performDiscards(drawFbDiscards);
+#       if RT64_FREE_DISCARDED_TARGETS
+            renderTargetManager.discard(drawFbDiscards, workloadCounter);
+#       endif
         }
 
         rdramCheckPending = false;
@@ -1736,6 +1739,11 @@ namespace RT64 {
         if (ext.textureCache->evict(workloadCounter, evictedTextureHashes)) {
             textureManager.removeHashes(evictedTextureHashes);
         }
+
+#   if RT64_FREE_DISCARDED_TARGETS
+        // The targets render to RAM drew of framebuffers discarded since, as the workload queue frees its own.
+        renderTargetManager.freeDiscarded(workloadCounter, WORKLOAD_QUEUE_SIZE * 32, renderFramebufferManager.get());
+#   endif
 
         if (renderToRDRAM) {
             // Indicate to the texture cache it's safe to delete the textures if no locks are active.

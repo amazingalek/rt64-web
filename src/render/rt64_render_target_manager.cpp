@@ -4,6 +4,8 @@
 
 #include "rt64_render_target_manager.h"
 
+#include <algorithm>
+
 #include "xxHash/xxh3.h"
 
 namespace RT64 {
@@ -50,12 +52,21 @@ namespace RT64 {
             return *target;
         }
 
+        // A target discard() set aside and freeDiscarded() hasn't freed yet is the same target again.
+        auto discardedIt = discardedMap.find(keyHash);
+        if (discardedIt != discardedMap.end()) {
+            target = std::move(discardedIt->second.target);
+            discardedMap.erase(discardedIt);
+            return *target;
+        }
+
         target = std::make_unique<RenderTarget>(key.address, key.fbType, multisampling, usesHDR);
         return *target;
     }
     
     void RenderTargetManager::destroyAll() {
         targetMap.clear();
+        discardedMap.clear();
     }
 
     void RenderTargetManager::setOverride(const RenderTargetKey &key, RenderTarget *target) {
@@ -64,6 +75,43 @@ namespace RT64 {
 
     void RenderTargetManager::removeOverride(const RenderTargetKey &key) {
         overrideMap.erase(key.hash());
+    }
+
+    // RT64_FREE_DISCARDED_TARGETS: the targets of the framebuffers at the addresses the framebuffer manager discarded,
+    // their RAM overwritten by the CPU, are set aside. One get() asks for again comes back as it was; the rest are
+    // freed by freeDiscarded(), so a game that moves its framebuffers (Perfect Dark allocates them and its depth buffer
+    // from each level's memory) doesn't keep every level's targets on the GPU.
+    void RenderTargetManager::discard(const std::vector<uint32_t> &addresses, uint64_t frame) {
+        if (addresses.empty()) {
+            return;
+        }
+
+        auto it = targetMap.begin();
+        while (it != targetMap.end()) {
+            const uint32_t address = it->second->addressForName;
+            if (std::find(addresses.begin(), addresses.end(), address) != addresses.end()) {
+                Discarded &discarded = discardedMap[it->first];
+                discarded.target = std::move(it->second);
+                discarded.frame = frame;
+                it = targetMap.erase(it);
+            }
+            else {
+                it++;
+            }
+        }
+    }
+
+    void RenderTargetManager::freeDiscarded(uint64_t frame, uint64_t minimumAge, RenderFramebufferManager *framebufferManager) {
+        auto it = discardedMap.begin();
+        while (it != discardedMap.end()) {
+            if ((frame - it->second.frame) >= minimumAge) {
+                framebufferManager->destroyAllWithRenderTarget(it->second.target.get());
+                it = discardedMap.erase(it);
+            }
+            else {
+                it++;
+            }
+        }
     }
 
     // RenderFramebufferKey

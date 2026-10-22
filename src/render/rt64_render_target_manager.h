@@ -5,6 +5,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <vector>
 
 #include "common/rt64_common.h"
 #include "hle/rt64_framebuffer.h"
@@ -24,9 +25,17 @@ namespace RT64 {
         bool isEmpty() const;
     };
 
+    struct RenderFramebufferManager;
+
     struct RenderTargetManager {
+        struct Discarded {
+            std::unique_ptr<RenderTarget> target;
+            uint64_t frame = 0;
+        };
+
         std::unordered_map<uint64_t, std::unique_ptr<RenderTarget>> targetMap;
         std::unordered_map<uint64_t, RenderTarget *> overrideMap;
+        std::unordered_map<uint64_t, Discarded> discardedMap;
         RenderMultisampling multisampling;
         bool usesHDR = false;
 
@@ -37,6 +46,8 @@ namespace RT64 {
         void destroyAll();
         void setOverride(const RenderTargetKey &key, RenderTarget *target);
         void removeOverride(const RenderTargetKey &key);
+        void discard(const std::vector<uint32_t> &addresses, uint64_t frame);
+        void freeDiscarded(uint64_t frame, uint64_t minimumAge, RenderFramebufferManager *framebufferManager);
     };
 
     struct RenderFramebufferKey {
