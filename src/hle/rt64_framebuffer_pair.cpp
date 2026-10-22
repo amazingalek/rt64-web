@@ -27,6 +27,7 @@ namespace RT64 {
         startFbOperations.clear();
         endFbOperations.clear();
         drawColorRect.reset();
+        viewportRect.reset();
         drawDepthRect.reset();
     }
 

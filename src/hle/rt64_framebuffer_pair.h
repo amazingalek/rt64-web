@@ -51,6 +51,7 @@ namespace RT64 {
         std::array<uint32_t, 4> ditherPatterns;
         FixedRect scissorRect;
         FixedRect drawColorRect;
+        FixedRect viewportRect; // The viewports the pass's triangles were drawn through, each cut to its scissor.
         FixedRect drawDepthRect;
         FlushReason flushReason;
 

@@ -1157,6 +1157,14 @@ namespace RT64 {
         }
 
         const FixedRect &scissorRect = state->rdp->scissorRectStack[state->rdp->scissorStackSize - 1];
+        if (!scissorRect.isNull()) {
+            const int16_t viewportRatios[4] = { 1, 1, -1, -1 };
+            const FixedRect viewportRect = viewportStack[viewportStackSize - 1].rect(viewportRatios).intersection(scissorRect);
+            if (!viewportRect.isNull()) {
+                fbPair.viewportRect.merge(viewportRect);
+            }
+        }
+
         if (visibleTri && !scissorRect.isNull()) {
             fbPair.scissorRect.merge(scissorRect);
 

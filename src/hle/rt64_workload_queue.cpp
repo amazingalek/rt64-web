@@ -438,6 +438,17 @@ namespace RT64 {
                     nativeColorWidth = colorImg.width;
                     nativeColorHeight = fbPair.drawColorRect.bottom(true);
 
+                    // The height becomes the target's, and RasterVS's clip space is built from it, so its bottom clips.
+                    // drawColorRect is fitted to where this game frame put the triangles, but an interpolated frame puts
+                    // them between the last game frame's place and this one's, and can put them lower: with the camera
+                    // pitching down, a band at the bottom was cut off while the framebuffer's height hadn't yet reached
+                    // it. The height is at least what the viewports the triangles were drawn through cover inside their
+                    // scissors, which the game sets and interpolation doesn't move. Not the scissor alone: it starts at
+                    // 8192 lines, and a game can draw to a small framebuffer under a screen-sized one.
+                    if (!fbPair.viewportRect.isNull()) {
+                        nativeColorHeight = std::max(nativeColorHeight, uint32_t(std::max(0, fbPair.viewportRect.bottom(true))));
+                    }
+
                     // When the target is much bigger than the reference height, we reduce the resolution scaling (but clamped to 1.0).
                     const uint32_t heightThreshold = (workload.viFbSize[1] > 0) ? ((workload.viFbSize[1] * 3) / 2) : 360;
                     uint32_t downsampleMultiplier = workloadConfig.downsampleMultiplier;
