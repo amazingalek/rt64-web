@@ -52,7 +52,17 @@ namespace RT64 {
         v[2][2] = -vp[2][3];
         v[3][2] = -vp[3][3];
 
-        p[2][2] = vp[0][2] / v[0][2];
+        // From the row where the view's Z axis is largest: it is a unit vector, so that row's is at least 1/sqrt(3).
+        // Row 0's alone is near zero for a camera looking along the world's Z, and in a fixed-point matrix the ratio
+        // of two such small values was a different depth range every frame, or 0/0 and no decomposition at all.
+        int zRow = 0;
+        for (int i = 1; i < 3; i++) {
+            if (fabsf(v[i][2]) > fabsf(v[zRow][2])) {
+                zRow = i;
+            }
+        }
+
+        p[2][2] = vp[zRow][2] / v[zRow][2];
         p[3][2] = vp[3][2] - p[2][2] * v[3][2];
 
         p[0][0] = sqrtf(sqr(vp[0][0]) + sqr(vp[1][0]) + sqr(vp[2][0]));
