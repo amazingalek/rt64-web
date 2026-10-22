@@ -40,8 +40,12 @@ namespace RT64 {
         fillRectOnly = fillRectOnly && (proj.type == Projection::Type::Rectangle) && (gameCall.callDesc.otherMode.cycleType() == G_CYC_FILL);
         gameCallCount++;
 
-        // Track what type of color dither this call used.
-        uint32_t ditherIndex = (gameCall.callDesc.otherMode.rgbDither() >> G_MDSFT_RGBDITHER) & 0x3;
+        // Track what type of color dither this call used. Fill and copy cycles never dither on hardware, whatever the
+        // other mode's dither bits say.
+        const uint32_t cycleType = gameCall.callDesc.otherMode.cycleType();
+        const bool ditherable = (cycleType != G_CYC_FILL) && (cycleType != G_CYC_COPY);
+        const uint32_t ditherBits = ditherable ? gameCall.callDesc.otherMode.rgbDither() : G_CD_DISABLE;
+        uint32_t ditherIndex = (ditherBits >> G_MDSFT_RGBDITHER) & 0x3;
         ditherPatterns[ditherIndex]++;
     }
 
