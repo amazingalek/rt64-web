@@ -3,7 +3,7 @@
 	url = https://github.com/epezent/implot
 [submodule "src/contrib/hlslpp"]
 	path = src/contrib/hlslpp
-	url = https://github.com/amazingalek/hlslpp-web
+	url = https://github.com/n64hub/hlslpp-web
 	branch = main
 [submodule "src/contrib/xess"]
 	path = src/contrib/xess
@@ -46,5 +46,5 @@
 	url = https://github.com/rt64/re-spirv
 [submodule "src/contrib/plume"]
 	path = src/contrib/plume
-	url = https://github.com/amazingalek/plume-web
+	url = https://github.com/n64hub/plume-web
 	branch = main
