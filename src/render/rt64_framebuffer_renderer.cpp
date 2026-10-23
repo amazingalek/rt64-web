@@ -1848,7 +1848,10 @@ namespace RT64 {
     }
 
     // Without descriptor indexing: finds the texture at every texture cache index that changed, and writes the TMEM of
-    // the entries that are only TMEM into the pool, uploading the range that changed. An entry the cache emptied keeps
+    // the entries that are only TMEM into the pool, uploading the runs of entries that changed. Not the range from the
+    // first to the last: a scene that makes new TMEM textures every frame (a framebuffer read back line by line, ~200 a
+    // frame) has them all over the cache, and that range was most of a pool of thousands, 10 MB a frame or more. Runs
+    // closer than TMEMPoolRunGap entries go as one upload, each run being a write and a copy. An entry the cache emptied keeps
     // its version (eviction doesn't change it), so indexTextures can still hold its deleted texture: only an index the
     // cache has a texture at this workload is read from it (updateDrawTextureSets).
     void FramebufferRenderer::updateIndexTextures(std::vector<BufferUploader::Upload> &shaderUploads) {
@@ -1865,8 +1868,8 @@ namespace RT64 {
             tmemPoolBytes.resize(std::max(cacheTextureCount, 1U) * TMEMBytes, 0);
         }
 
-        uint32_t tmemFirst = UINT32_MAX;
-        uint32_t tmemLast = 0;
+        const uint32_t TMEMPoolRunGap = 16;
+        tmemPoolRuns.clear();
         if (descriptorTextureGlobalVersion != textureCacheGlobalVersion) {
             for (uint32_t i = 0; i < cacheTextureCount; i++) {
                 if (textureCacheVersions[i] == descriptorTextureVersions[i]) {
@@ -1892,8 +1895,12 @@ namespace RT64 {
                     const size_t byteCount = std::min(cacheTexture->bytesTMEM.size(), size_t(TMEMBytes));
                     memcpy(poolBytes, cacheTexture->bytesTMEM.data(), byteCount);
                     memset(poolBytes + byteCount, 0, TMEMBytes - byteCount);
-                    tmemFirst = std::min(tmemFirst, i);
-                    tmemLast = std::max(tmemLast, i);
+                    if (!tmemPoolRuns.empty() && (i <= tmemPoolRuns.back().second + TMEMPoolRunGap)) {
+                        tmemPoolRuns.back().second = i + 1;
+                    }
+                    else {
+                        tmemPoolRuns.emplace_back(i, i + 1);
+                    }
                 }
 
                 indexTexture.stamp = ++drawTextureStampCounter;
@@ -1902,13 +1909,16 @@ namespace RT64 {
             descriptorTextureGlobalVersion = textureCacheGlobalVersion;
         }
 
-        // The pool must exist to be bound, even with no TMEM in it.
-        if (tmemPoolBuffer.defaultBuffer == nullptr) {
-            tmemFirst = std::min(tmemFirst, 0U);
+        // The pool must exist to be bound, even with no TMEM in it. A pool made anew (a first or a larger one) gets
+        // everything up to the last change in one upload, which the uploader starts from the pool's first entry.
+        const uint32_t tmemEnd = tmemPoolRuns.empty() ? 1 : tmemPoolRuns.back().second;
+        if ((tmemPoolBuffer.defaultBuffer == nullptr) || (tmemPoolBuffer.allocatedSize < (uint64_t(tmemEnd) * TMEMBytes))) {
+            shaderUploads.push_back({ tmemPoolBytes.data(), { 0, tmemEnd }, TMEMBytes, RenderBufferFlag::STORAGE, { }, &tmemPoolBuffer });
         }
-
-        if (tmemFirst <= tmemLast) {
-            shaderUploads.push_back({ tmemPoolBytes.data(), { tmemFirst, tmemLast + 1 }, TMEMBytes, RenderBufferFlag::STORAGE, { }, &tmemPoolBuffer });
+        else {
+            for (const std::pair<uint32_t, uint32_t> &run : tmemPoolRuns) {
+                shaderUploads.push_back({ tmemPoolBytes.data(), run, TMEMBytes, RenderBufferFlag::STORAGE, { }, &tmemPoolBuffer });
+            }
         }
     }
 

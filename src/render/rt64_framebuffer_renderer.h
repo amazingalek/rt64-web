@@ -120,6 +120,7 @@ namespace RT64 {
         std::vector<DrawTexture> indexTextures;
         std::unordered_map<uint32_t, DrawTexture> dynamicIndexTextures;
         std::vector<uint8_t> tmemPoolBytes;
+        std::vector<std::pair<uint32_t, uint32_t>> tmemPoolRuns;
         BufferPair tmemPoolBuffer;
         const RenderBuffer *tmemPoolBufferBound = nullptr;
         std::unique_ptr<FramebufferRendererDescriptorTMEMSet> descTMEMSet;
