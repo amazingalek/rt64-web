@@ -4,9 +4,7 @@
 
 #include "rt64_rsp.h"
 
-#include <algorithm>
 #include <cassert>
-#include <cmath>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -1186,12 +1184,12 @@ namespace RT64 {
             FixedRect drawRect = unprojectable ? scissorRect : FixedRect();
             for (int i = 0; (i < 3) && !unprojectable; i++) {
                 const hlslpp::float3 &s = posScreen[globalIndices[i]];
-                const float x = std::clamp(float(s[0]), -8192.0f, 8192.0f);
-                const float y = std::clamp(float(s[1]), -8192.0f, 8192.0f);
+                const float x = std::min(std::max(float(s[0]), -8192.0f), 8192.0f);
+                const float y = std::min(std::max(float(s[1]), -8192.0f), 8192.0f);
                 drawRect.ulx = std::min(drawRect.ulx, int32_t(x * 4.0f));
                 drawRect.uly = std::min(drawRect.uly, int32_t(y * 4.0f));
-                drawRect.lrx = std::max(drawRect.lrx, int32_t(std::ceil(x) * 4.0f));
-                drawRect.lry = std::max(drawRect.lry, int32_t(std::ceil(y) * 4.0f));
+                drawRect.lrx = std::max(drawRect.lrx, int32_t(hlslpp::ceil(hlslpp::float1(x)).x * 4.0f));
+                drawRect.lry = std::max(drawRect.lry, int32_t(hlslpp::ceil(hlslpp::float1(y)).x * 4.0f));
             }
 
             const interop::RSPViewport &viewport = viewportStack[viewportStackSize - 1];
