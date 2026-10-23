@@ -1013,16 +1013,46 @@ namespace RT64 {
             tileCopyBeforeBarriers.clear();
             tileCopyAfterBarriers.clear();
 
+#       if defined(__EMSCRIPTEN__)
+            // On the web each region is a texture copy instead of a draw. A draw into a tile copy's own framebuffer is
+            // a render pass of its own in WebGPU, and a browser spends far more of its CPU on a pass than on a copy: a
+            // game that reads its framebuffer back line by line made ~200 passes a present this way. WebGPU orders its
+            // copies itself, so the drivers' synchronization quirks the draws avoid (below) don't arise. The source
+            // and the tile copy are both colorBufferFormat and the draw loads each texel 1:1, so a copy writes the same.
+            const RenderTextureLayout dstLayout = RenderTextureLayout::COPY_DEST;
+            const RenderTextureLayout srcLayout = RenderTextureLayout::COPY_SOURCE;
+            const RenderBarrierStages copyStage = RenderBarrierStage::COPY;
+#       else
+            const RenderTextureLayout dstLayout = RenderTextureLayout::COLOR_WRITE;
+            const RenderTextureLayout srcLayout = RenderTextureLayout::SHADER_READ;
+            const RenderBarrierStages copyStage = RenderBarrierStage::GRAPHICS;
+#       endif
             for (const CommandListCopyRegion &copy : cmdListCopies.cmdListCopyRegions) {
-                tileCopyBeforeBarriers.push_back(RenderTextureBarrier(copy.dstTexture, RenderTextureLayout::COLOR_WRITE));
+                tileCopyBeforeBarriers.push_back(RenderTextureBarrier(copy.dstTexture, dstLayout));
                 tileCopyAfterBarriers.push_back(RenderTextureBarrier(copy.dstTexture, RenderTextureLayout::SHADER_READ));
             }
 
             for (RenderTarget *renderTarget : cmdListCopies.copyRegionTargets) {
-                tileCopyBeforeBarriers.emplace_back(RenderTextureBarrier(renderTarget->getResolvedTexture(), RenderTextureLayout::SHADER_READ));
+                tileCopyBeforeBarriers.emplace_back(RenderTextureBarrier(renderTarget->getResolvedTexture(), srcLayout));
             }
 
-            renderWorker->commandList->barriers(RenderBarrierStage::GRAPHICS, tileCopyBeforeBarriers);
+            renderWorker->commandList->barriers(copyStage, tileCopyBeforeBarriers);
+
+#       if defined(__EMSCRIPTEN__)
+            for (const CommandListCopyRegion &copy : cmdListCopies.cmdListCopyRegions) {
+                // A tile that starts past the target's edge has nothing to copy: its size wrapped below zero.
+                const float width = copy.pushConstants.uvScale.x;
+                const float height = copy.pushConstants.uvScale.y;
+                if ((width < 1.0f) || (height < 1.0f) || (width > float(RenderTarget::MaxDimension)) || (height > float(RenderTarget::MaxDimension))) {
+                    continue;
+                }
+
+                const int32_t left = int32_t(copy.pushConstants.uvScroll.x);
+                const int32_t top = int32_t(copy.pushConstants.uvScroll.y);
+                const RenderBox srcBox(left, top, left + int32_t(std::lround(width)), top + int32_t(std::lround(height)));
+                renderWorker->commandList->copyTextureRegion(RenderTextureCopyLocation::Subresource(copy.dstTexture), RenderTextureCopyLocation::Subresource(copy.srcTexture), 0, 0, 0, &srcBox);
+            }
+#       else
 
             // Use the rasterization pipeline to copy the texture regions. Using the dedicated transfer commands does not behave consistently
             // enough across hardware to use it directly when it comes to synchronization due to unknown reasons found during testing (probably
@@ -1045,6 +1075,7 @@ namespace RT64 {
                 renderWorker->commandList->setGraphicsPushConstants(0, &copy.pushConstants);
                 renderWorker->commandList->drawInstanced(3, 1, 0, 0);
             }
+#       endif
 
             renderWorker->commandList->barriers(RenderBarrierStage::GRAPHICS_AND_COMPUTE, tileCopyAfterBarriers);
         }
